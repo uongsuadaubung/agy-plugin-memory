@@ -1,5 +1,7 @@
 # uongsuadaubung-memory - Memory MCP Server & Plugin (Pure Rust Engine)
 
+[![Download Executables](https://img.shields.io/badge/Download-Pre--compiled_Binaries-blue?style=for-the-badge&logo=github)](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest)
+
 A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifecycle Hook plugin for Antigravity, engineered entirely in **Pure Rust** with statically compiled SQLite (`rusqlite` bundled), Full-Text Search (`FTS5` + `BM25` ranking), and unified batch processing.
 
 ---
