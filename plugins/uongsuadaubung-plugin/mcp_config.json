@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "uongsuadaubung-memory": {
+      "command": "uongsuadaubung-memory",
+      "args": ["mcp"]
+    }
+  }
+}

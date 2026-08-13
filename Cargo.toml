@@ -1,0 +1,19 @@
+[package]
+name = "uongsuadaubung-memory"
+version = "1.0.0"
+edition = "2021"
+authors = ["uongsuadaubung"]
+description = "High-performance Rust memory server & plugin for Antigravity (uongsuadaubung-memory)"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+dirs = "5.0"
+md-5 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bin]]
+name = "uongsuadaubung-memory"
+path = "src/main.rs"

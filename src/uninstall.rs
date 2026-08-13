@@ -1,0 +1,96 @@
+use std::env;
+use std::fs;
+
+#[cfg(target_os = "windows")]
+fn remove_bin_from_user_path() {
+    if let Some(mut bin_dir) = dirs::home_dir() {
+        bin_dir.push(".gemini");
+        bin_dir.push("config");
+        bin_dir.push("plugins");
+        bin_dir.push("uongsuadaubung-plugin");
+        bin_dir.push("bin");
+
+        let bin_str = bin_dir.to_string_lossy().to_string();
+        let cmd = format!(
+            "$bin = '{}'; $old = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($old -like '*'+$bin+'*') {{ $new = ($old -split ';' | Where-Object {{ $_ -ne $bin }}) -join ';'; [Environment]::SetEnvironmentVariable('PATH', $new, 'User') }}",
+            bin_str
+        );
+
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &cmd])
+            .output();
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn remove_bin_from_user_path() {}
+
+#[cfg(target_os = "windows")]
+fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
+    let dir_str = plugin_dir.to_string_lossy();
+    let ps_cmd = format!(
+        "$p = '{}'; for ($i=0; $i -lt 5; $i++) {{ Start-Sleep -Seconds 1; if (Test-Path $p) {{ Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue }} else {{ break }} }}",
+        dir_str
+    );
+
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_cmd])
+        .spawn();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
+    let dir_str = plugin_dir.to_string_lossy();
+    let sh_cmd = format!("for i in 1 2 3 4 5; do sleep 1; if [ -d '{}' ]; then rm -rf '{}'; else break; fi; done", dir_str, dir_str);
+    let _ = std::process::Command::new("sh")
+        .args(["-c", &sh_cmd])
+        .spawn();
+}
+
+pub fn run_uninstall_mode() {
+    let mut plugin_dir = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            println!("❌ Could not resolve home directory.");
+            return;
+        }
+    };
+
+    plugin_dir.push(".gemini");
+    plugin_dir.push("config");
+    plugin_dir.push("plugins");
+    plugin_dir.push("uongsuadaubung-plugin");
+
+    let curr_exe = env::current_exe().ok();
+
+    if plugin_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&plugin_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ref exe) = curr_exe {
+                    if path == *exe || path.join("memory-server.exe") == *exe {
+                        continue;
+                    }
+                }
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(&path);
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+
+        if fs::remove_dir_all(&plugin_dir).is_err() {
+            schedule_delayed_deletion(&plugin_dir);
+            println!("⏳ Scheduled background self-deletion on exit.");
+        } else {
+            println!("🗑️ Plugin directory removed: {}", plugin_dir.display());
+        }
+    } else {
+        println!("ℹ️ Plugin directory does not exist: {}", plugin_dir.display());
+    }
+
+    remove_bin_from_user_path();
+    println!("🧹 Removed plugin bin directory from User PATH.");
+    println!("✅ uongsuadaubung-plugin successfully uninstalled!");
+}

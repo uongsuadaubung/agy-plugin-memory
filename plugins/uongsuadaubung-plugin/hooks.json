@@ -1,0 +1,11 @@
+{
+  "memory-auto-load": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "uongsuadaubung-memory hook",
+        "timeout": 10
+      }
+    ]
+  }
+}

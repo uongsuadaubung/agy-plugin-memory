@@ -1,0 +1,16 @@
+/target
+/dist
+*.exe
+*.pdb
+*.json
+!Cargo.json
+!plugin.json
+!mcp_config.json
+!hooks.json
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.idea
+.vscode
+*.log
