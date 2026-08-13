@@ -1,5 +1,5 @@
 {
-  "name": "uongsuadaubung-plugin",
+  "name": "apm-mcp",
   "version": "1.0.0",
   "description": "Smart Project & Global Memory Management Plugin powered by Bun, bun:sqlite, and Antigravity Lifecycle Hooks"
 }

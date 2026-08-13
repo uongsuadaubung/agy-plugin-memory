@@ -70,7 +70,7 @@ pub fn run_mcp_mode() {
                             "tools": { "listChanged": true }
                         },
                         "serverInfo": {
-                            "name": "uongsuadaubung-memory-rust",
+                            "name": "apm-mcp-rust",
                             "version": "1.0.0"
                         }
                     })),
@@ -234,6 +234,30 @@ pub fn run_mcp_mode() {
                                 },
                                 "required": ["project_id"]
                             }
+                        },
+                        {
+                            "name": "link_projects",
+                            "description": "Link current project to 1 or more target projects to inherit their permanent rules.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "project_id": { "type": "string", "description": "Current Project ID" },
+                                    "target_project_ids": { "type": "array", "items": { "type": "string" }, "description": "Array of target project IDs to link" },
+                                    "path": { "type": "string", "description": "Optional directory path" }
+                                },
+                                "required": ["project_id", "target_project_ids"]
+                            }
+                        },
+                        {
+                            "name": "get_project_links",
+                            "description": "Get linked project IDs for a project.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "project_id": { "type": "string", "description": "Project ID" }
+                                },
+                                "required": ["project_id"]
+                            }
                         }
                     ]
                 });
@@ -257,7 +281,7 @@ pub fn run_mcp_mode() {
                         let name = args.get("name").and_then(|v| v.as_str());
                         let path = args.get("path").and_then(|v| v.as_str());
                         match get_or_create_project(name, path, true) {
-                            Ok(p) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count })).unwrap() }] }),
+                            Ok(p) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count, "linked_project_ids": p.linked_project_ids })).unwrap() }] }),
                             Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
                         }
                     }
@@ -384,6 +408,25 @@ pub fn run_mcp_mode() {
                             Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "deletedCount": count })).unwrap() }] }),
                             Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
                         }
+                    }
+
+                    "link_projects" => {
+                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let target_project_ids: Vec<String> = args.get("target_project_ids")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                            .unwrap_or_default();
+                        let path = args.get("path").and_then(|v| v.as_str());
+
+                        match link_projects(project_id, target_project_ids, path) {
+                            Ok(p) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "id": p.id, "linked_project_ids": p.linked_project_ids })).unwrap() }] }),
+                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                        }
+                    }
+
+                    "get_project_links" => {
+                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let linked = get_linked_project_ids(project_id);
+                        json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "project_id": project_id, "linked_project_ids": linked })).unwrap() }] })
                     }
 
                     _ => json!({

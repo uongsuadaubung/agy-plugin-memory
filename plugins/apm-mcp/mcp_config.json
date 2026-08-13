@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "apm-mcp": {
+      "command": "apm-mcp",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -5,6 +5,10 @@ use std::io::{self, Read};
 use crate::db::{get_memories, get_or_create_project};
 use crate::project::find_project_root;
 
+pub const MAX_GLOBAL_MEMORIES: usize = 1000;
+pub const MAX_PERMANENT_MEMORIES: usize = 1000;
+pub const MAX_SHORT_TERM_MEMORIES: usize = 50;
+
 #[derive(Debug, Deserialize)]
 struct HookPayload {
     #[serde(rename = "workspacePaths")]
@@ -53,36 +57,54 @@ pub fn run_hook_mode() {
         }
     };
 
-    // Load ALL permanent rules + top 5 most recent short-term progress memories for token efficiency
-    let global_mems = get_memories("global", 100, None, Some(true), None).unwrap_or_default();
-    let perm_mems = get_memories(&project.id, 100, None, Some(true), Some(&root_str)).unwrap_or_default();
-    let recent_mems = get_memories(&project.id, 5, None, Some(false), Some(&root_str)).unwrap_or_default();
+    // Load ALL valid global & permanent rules + top short-term memories up to MAX_SHORT_TERM_MEMORIES
+    let global_mems = get_memories("global", MAX_GLOBAL_MEMORIES, None, None, None).unwrap_or_default();
+    let perm_mems = get_memories(&project.id, MAX_PERMANENT_MEMORIES, None, Some(true), Some(&root_str)).unwrap_or_default();
+    let short_term_mems = get_memories(&project.id, MAX_SHORT_TERM_MEMORIES, None, Some(false), Some(&root_str)).unwrap_or_default();
 
-    if global_mems.is_empty() && perm_mems.is_empty() && recent_mems.is_empty() {
+    // Load permanent rules for linked projects
+    let mut linked_mems_by_proj: Vec<(String, Vec<crate::db::MemoryRecord>)> = Vec::new();
+    for linked_id in &project.linked_project_ids {
+        if linked_id != &project.id && linked_id != "global" {
+            let lmems = get_memories(linked_id, MAX_PERMANENT_MEMORIES, None, Some(true), None).unwrap_or_default();
+            if !lmems.is_empty() {
+                linked_mems_by_proj.push((linked_id.clone(), lmems));
+            }
+        }
+    }
+
+    if global_mems.is_empty() && perm_mems.is_empty() && short_term_mems.is_empty() && linked_mems_by_proj.is_empty() {
         println!("{}", json!({ "injectSteps": [] }));
         return;
     }
 
-    let mut ctx_text = format!("🧠 [Memory Context: {}]\n", project.name);
+    let mut ctx_text = format!("[Memory Context: {} | Project ID: {}]\n", project.name, project.id);
 
     if !global_mems.is_empty() {
-        ctx_text.push_str("\n🌐 Global User Rules:\n");
+        ctx_text.push_str("\nGlobal User Rules:\n");
         for m in &global_mems {
-            ctx_text.push_str(&format!("• {}\n", m.content));
+            ctx_text.push_str(&format!("- {}\n", m.content));
         }
     }
 
     if !perm_mems.is_empty() {
-        ctx_text.push_str("\n📌 Project Permanent Rules:\n");
+        ctx_text.push_str("\nProject Permanent Rules:\n");
         for m in &perm_mems {
-            ctx_text.push_str(&format!("• {}\n", m.content));
+            ctx_text.push_str(&format!("- {}\n", m.content));
         }
     }
 
-    if !recent_mems.is_empty() {
-        ctx_text.push_str("\n🕒 Recent Progress:\n");
-        for m in &recent_mems {
-            ctx_text.push_str(&format!("• {}\n", m.content));
+    for (linked_id, lmems) in &linked_mems_by_proj {
+        ctx_text.push_str(&format!("\nLinked Project Rules (from: {}):\n", linked_id));
+        for m in lmems {
+            ctx_text.push_str(&format!("- {}\n", m.content));
+        }
+    }
+
+    if !short_term_mems.is_empty() {
+        ctx_text.push_str("\nProject Short-Term Memories:\n");
+        for m in &short_term_mems {
+            ctx_text.push_str(&format!("- {}\n", m.content));
         }
     }
 

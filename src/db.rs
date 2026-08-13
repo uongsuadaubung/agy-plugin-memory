@@ -2,10 +2,44 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::project::get_auto_detected_project;
+
+fn tokenize_text(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty() && s.len() > 1)
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn is_similar_or_replacement(new_text: &str, old_text: &str) -> bool {
+    let lower_new = new_text.to_lowercase();
+    let lower_old = old_text.to_lowercase();
+
+    if lower_new == lower_old || lower_new.contains(&lower_old) || lower_old.contains(&lower_new) {
+        return true;
+    }
+
+    let set1 = tokenize_text(new_text);
+    let set2 = tokenize_text(old_text);
+
+    if set1.is_empty() || set2.is_empty() {
+        return false;
+    }
+
+    let intersection_count = set1.intersection(&set2).count();
+    let union_count = set1.union(&set2).count();
+    let min_count = set1.len().min(set2.len());
+
+    let jaccard = (intersection_count as f64) / (union_count as f64);
+    let overlap_min = (intersection_count as f64) / (min_count as f64);
+
+    jaccard >= 0.60 || (min_count >= 2 && overlap_min >= 0.75)
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectRecord {
@@ -15,6 +49,7 @@ pub struct ProjectRecord {
     pub created_at: String,
     pub last_active: String,
     pub memory_count: i64,
+    pub linked_project_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -126,20 +161,18 @@ pub fn get_db_connection() -> Result<Connection> {
         ",
     )?;
 
+    let _ = conn.execute(
+        "ALTER TABLE projects ADD COLUMN linked_project_ids TEXT DEFAULT '[]'",
+        [],
+    );
+
     // Ensure global special project exists
     let now = Utc::now().to_rfc3339();
     let _ = conn.execute(
-        "INSERT INTO projects (id, name, path, created_at, last_active, memory_count)
-         VALUES ('global', 'Global User Memories', 'GLOBAL', ?1, ?1, 0)
+        "INSERT INTO projects (id, name, path, created_at, last_active, memory_count, linked_project_ids)
+         VALUES ('global', 'Global User Memories', 'GLOBAL', ?1, ?1, 0, '[]')
          ON CONFLICT(id) DO NOTHING",
         params![now],
-    );
-
-    // Clean up empty throwaway projects older than 7 days
-    let cutoff_empty = (Utc::now() - chrono::Duration::days(7)).to_rfc3339();
-    let _ = conn.execute(
-        "DELETE FROM projects WHERE memory_count = 0 AND id != 'global' AND last_active < ?1",
-        params![cutoff_empty],
     );
 
     Ok(conn)
@@ -154,8 +187,10 @@ pub fn get_or_create_project(
     let conn = get_db_connection()?;
     let now = Utc::now().to_rfc3339();
 
-    let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count FROM projects WHERE id = ?1")?;
+    let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids FROM projects WHERE id = ?1")?;
     let existing = stmt.query_row(params![auto_proj.id], |row| {
+        let raw_linked: String = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[]".to_string());
+        let linked_project_ids: Vec<String> = serde_json::from_str(&raw_linked).unwrap_or_default();
         Ok(ProjectRecord {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -163,6 +198,7 @@ pub fn get_or_create_project(
             created_at: row.get(3)?,
             last_active: row.get(4)?,
             memory_count: row.get(5)?,
+            linked_project_ids,
         })
     });
 
@@ -193,6 +229,7 @@ pub fn get_or_create_project(
             created_at: now.clone(),
             last_active: now,
             memory_count: 0,
+            linked_project_ids: vec![],
         });
     }
 
@@ -203,17 +240,19 @@ pub fn get_or_create_project(
         created_at: now.clone(),
         last_active: now,
         memory_count: 0,
+        linked_project_ids: vec![],
     };
 
     conn.execute(
-        "INSERT INTO projects (id, name, path, created_at, last_active, memory_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO projects (id, name, path, created_at, last_active, memory_count, linked_project_ids) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             new_proj.id,
             new_proj.name,
             new_proj.path,
             new_proj.created_at,
             new_proj.last_active,
-            new_proj.memory_count
+            new_proj.memory_count,
+            "[]"
         ],
     )?;
 
@@ -242,13 +281,26 @@ pub fn batch_add_memories(
         let tags = item.tags.unwrap_or_default();
         let metadata = item.metadata.unwrap_or(json!({}));
 
-        let existing_id: Option<String> = tx
-            .query_row(
-                "SELECT id FROM memories WHERE project_id = ?1 AND (LOWER(content) = LOWER(?2) OR LOWER(?2) LIKE '%' || LOWER(content) || '%') LIMIT 1",
-                params![target_id, trimmed_content],
-                |r| r.get(0),
-            )
-            .ok();
+        let mut existing_id: Option<String> = None;
+        let mut final_is_permanent = is_permanent;
+
+        {
+            let mut stmt = tx.prepare("SELECT id, content, is_permanent FROM memories WHERE project_id = ?1")?;
+            let existing_rows: Vec<(String, String, i32)> = stmt
+                .query_map(params![target_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .flatten()
+                .collect();
+
+            for (eid, econtent, eperm) in existing_rows {
+                if is_similar_or_replacement(trimmed_content, &econtent) {
+                    existing_id = Some(eid);
+                    if eperm == 1 {
+                        final_is_permanent = true;
+                    }
+                    break;
+                }
+            }
+        }
 
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
         let meta_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
@@ -261,7 +313,7 @@ pub fn batch_add_memories(
                     trimmed_content,
                     tags_json,
                     meta_json,
-                    if is_permanent { 1 } else { 0 },
+                    if final_is_permanent { 1 } else { 0 },
                     now,
                     tokens_estimated,
                     eid
@@ -590,10 +642,57 @@ pub fn clear_project_memories(project_id: &str, path: Option<&str>) -> Result<us
     Ok(deleted_count)
 }
 
+pub fn link_projects(
+    project_id: &str,
+    target_project_ids: Vec<String>,
+    path: Option<&str>,
+) -> Result<ProjectRecord> {
+    let proj = get_or_create_project(None, path, true)?;
+    let target_id = if project_id == "global" {
+        "global".to_string()
+    } else {
+        proj.id
+    };
+
+    let filtered_targets: Vec<String> = target_project_ids
+        .into_iter()
+        .filter(|id| id != &target_id)
+        .collect();
+
+    let json_targets = serde_json::to_string(&filtered_targets).unwrap_or_else(|_| "[]".to_string());
+
+    let conn = get_db_connection()?;
+    conn.execute(
+        "UPDATE projects SET linked_project_ids = ?1 WHERE id = ?2",
+        params![json_targets, target_id],
+    )?;
+
+    get_or_create_project(None, path, false)
+}
+
+pub fn get_linked_project_ids(project_id: &str) -> Vec<String> {
+    let conn = match get_db_connection() {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let raw: String = conn
+        .query_row(
+            "SELECT linked_project_ids FROM projects WHERE id = ?1",
+            params![project_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "[]".to_string());
+
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
 pub fn list_projects() -> Result<Vec<ProjectRecord>> {
     let conn = get_db_connection()?;
-    let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count FROM projects ORDER BY last_active DESC")?;
+    let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids FROM projects ORDER BY last_active DESC")?;
     let rows = stmt.query_map([], |row| {
+        let raw_linked: String = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[]".to_string());
+        let linked_project_ids: Vec<String> = serde_json::from_str(&raw_linked).unwrap_or_default();
         Ok(ProjectRecord {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -601,6 +700,7 @@ pub fn list_projects() -> Result<Vec<ProjectRecord>> {
             created_at: row.get(3)?,
             last_active: row.get(4)?,
             memory_count: row.get(5)?,
+            linked_project_ids,
         })
     })?;
 

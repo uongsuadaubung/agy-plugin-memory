@@ -7,7 +7,7 @@ fn remove_bin_from_user_path() {
         bin_dir.push(".gemini");
         bin_dir.push("config");
         bin_dir.push("plugins");
-        bin_dir.push("uongsuadaubung-plugin");
+        bin_dir.push("apm-mcp");
         bin_dir.push("bin");
 
         let bin_str = bin_dir.to_string_lossy().to_string();
@@ -51,7 +51,7 @@ pub fn run_uninstall_mode() {
     let mut plugin_dir = match dirs::home_dir() {
         Some(h) => h,
         None => {
-            println!("❌ Could not resolve home directory.");
+            println!("[ERROR] Could not resolve home directory.");
             return;
         }
     };
@@ -59,7 +59,7 @@ pub fn run_uninstall_mode() {
     plugin_dir.push(".gemini");
     plugin_dir.push("config");
     plugin_dir.push("plugins");
-    plugin_dir.push("uongsuadaubung-plugin");
+    plugin_dir.push("apm-mcp");
 
     let curr_exe = env::current_exe().ok();
 
@@ -82,15 +82,31 @@ pub fn run_uninstall_mode() {
 
         if fs::remove_dir_all(&plugin_dir).is_err() {
             schedule_delayed_deletion(&plugin_dir);
-            println!("⏳ Scheduled background self-deletion on exit.");
+            println!("[INFO] Scheduled background self-deletion on exit.");
         } else {
-            println!("🗑️ Plugin directory removed: {}", plugin_dir.display());
+            println!("[CLEAN] Plugin directory removed: {}", plugin_dir.display());
         }
     } else {
-        println!("ℹ️ Plugin directory does not exist: {}", plugin_dir.display());
+        println!("[INFO] Plugin directory does not exist: {}", plugin_dir.display());
+    }
+
+    // Remove memory database directory (~/.gemini/config/memory)
+    if let Some(mut mem_dir) = dirs::home_dir() {
+        mem_dir.push(".gemini");
+        mem_dir.push("config");
+        mem_dir.push("memory");
+
+        if mem_dir.exists() {
+            if fs::remove_dir_all(&mem_dir).is_err() {
+                schedule_delayed_deletion(&mem_dir);
+                println!("[INFO] Scheduled background memory database directory self-deletion on exit.");
+            } else {
+                println!("[CLEAN] Memory database directory removed: {}", mem_dir.display());
+            }
+        }
     }
 
     remove_bin_from_user_path();
-    println!("🧹 Removed plugin bin directory from User PATH.");
-    println!("✅ uongsuadaubung-plugin successfully uninstalled!");
+    println!("[CLEAN] Removed plugin bin directory from User PATH.");
+    println!("[SUCCESS] apm-mcp successfully uninstalled!");
 }

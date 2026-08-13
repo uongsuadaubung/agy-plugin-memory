@@ -1,9 +1,9 @@
 [package]
-name = "uongsuadaubung-memory"
+name = "apm-mcp"
 version = "1.0.0"
 edition = "2021"
 authors = ["uongsuadaubung"]
-description = "High-performance Rust memory server & plugin for Antigravity (uongsuadaubung-memory)"
+description = "High-performance Rust memory server & plugin for Antigravity (apm-mcp)"
 
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
@@ -15,5 +15,5 @@ md-5 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 
 [[bin]]
-name = "uongsuadaubung-memory"
+name = "apm-mcp"
 path = "src/main.rs"

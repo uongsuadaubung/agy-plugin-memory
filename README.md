@@ -1,22 +1,23 @@
-# uongsuadaubung-memory - Memory MCP Server & Plugin (Pure Rust Engine)
+# apm-mcp - Memory MCP Server & Plugin (Pure Rust Engine)
 
 [![Download Executables](https://img.shields.io/badge/Download-Pre--compiled_Binaries-blue?style=for-the-badge&logo=github)](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest)
 
-A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifecycle Hook plugin for Antigravity, engineered entirely in **Pure Rust** with statically compiled SQLite (`rusqlite` bundled), Full-Text Search (`FTS5` + `BM25` ranking), and unified batch processing.
+An ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifecycle Hook plugin for Antigravity, engineered entirely in **Pure Rust** with statically compiled SQLite (`rusqlite` bundled), Full-Text Search (`FTS5` + `BM25` ranking), Smart Upsert deduplication, and project memory inheritance.
 
 ---
 
 ## 🌟 Key Architecture & Design Highlights
 
-- 🦀 **Pure Rust Core Engine**: Single compiled executable (`uongsuadaubung-memory.exe` / `uongsuadaubung-memory`, ~2.2MB RAM footprint, <1ms tool response times).
-- 📦 **Compile-Time Embedded Assets (`include_str!`)**: All plugin manifests, rules, instructions, and slash workflows are embedded directly into binary bytes.
-- ⚡ **1-Click Self-Installing Executable**: `uongsuadaubung-memory install` automatically extracts plugin files to `~/.gemini/config/plugins/uongsuadaubung-plugin/`, copies the binary to `bin/`, and registers the User `PATH` environment variable.
-- 🧹 **Uninstall with Detached Self-Deletion**: `uongsuadaubung-memory uninstall` cleans up PATH, removes plugin assets, and spawns a background process that retries self-deletion on exit.
-- 🛡️ **Hard-Lock Global Protection**: Global User Memory (`project_id = "global"`) is permanently protected from accidental project mass deletion or clearing.
+- 🦀 **Pure Rust Core Engine**: Single compiled executable (`apm-mcp.exe` / `apm-mcp`, ~2.2MB RAM footprint, <1ms tool response times).
+- 🧠 **Smart Upsert (Token Jaccard Similarity $\ge 60\%$ & Overlap Ratio $\ge 75\%$)**: Automatically detects similar or supplementary memory entries and updates existing records in Rust DB instead of creating duplicate or conflicting rows.
+- 🔄 **Project Linking & Memory Inheritance**: Link projects (`link_projects`) to automatically inherit permanent rules from related ecosystem projects during PreInvocation Hook execution.
+- 🏛️ **Automated Project Architecture Learning**: Auto-maps and saves project layout trees as permanent rules (`tags: ["architecture"]`) during `/init-apm` workflow and updates them upon layout refactoring.
+- ⚡ **Full Memory PreInvocation Hook**: Automatically injects 100% of Global Rules, 100% of Project Permanent Rules, Linked Project Rules, and the top 50 newest Short-Term Progress Memories into AI prompt context. Clean pure-text badges, zero emoji noise.
 - 🚀 **Unified Batch-First API**: All creation, deletion, and permanence toggle operations use unified batch APIs (`items` / `memory_ids` arrays) to eliminate agent decision fatigue and reduce tool call overhead.
-- ⚡ **High-Speed SQLite Transactions & PRAGMAs**: Batch operations execute inside a single SQLite transaction with `WAL` mode, `synchronous = NORMAL`, `cache_size = -64000` (64MB RAM cache), and covering compound indexes.
-- 🧹 **Lazy Project Creation & Throwaway Purge**: Temporary test folders create 0 database rows until a memory is actually saved. Unused empty projects older than 7 days are auto-purged.
-- 💡 **Token-Efficient Compact JSON Output**: Stdio tool responses strip redundant internal metadata, token counters, and white spaces, reducing LLM context window consumption by up to 60%.
+- 📦 **1-Click Self-Installing Executable**: `apm-mcp install` automatically purges previous installations, extracts plugin files to `~/.gemini/config/plugins/apm-mcp/`, copies binary to `bin/`, and registers User `PATH`.
+- 🧹 **Clean Uninstall with Detached Self-Deletion**: `apm-mcp uninstall` cleans up PATH, removes plugin assets, purges memory database directory (`~/.gemini/config/memory`), and spawns a background process for self-deletion.
+- 🛡️ **Hard-Lock Global Protection**: Global User Memory (`project_id = "global"`) is permanently protected from accidental project mass deletion or clearing.
+- 🏆 **Single GitHub Release Workflow**: GitHub Actions pipeline automatically deletes previous releases and tags, keeping exactly **1 clean `latest` release** containing cross-platform pre-compiled binaries (Windows, Linux, macOS).
 
 ---
 
@@ -24,31 +25,34 @@ A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifec
 
 | Command | Description |
 |---|---|
-| `uongsuadaubung-memory install` | Install plugin to `~/.gemini/config/plugins/uongsuadaubung-plugin/` and register User `PATH`. |
-| `uongsuadaubung-memory uninstall` | Uninstall plugin, clean User `PATH`, and trigger background executable self-deletion on exit. |
-| `uongsuadaubung-memory projects` | Print an ASCII table of all registered projects in terminal (ID, Memory Count, Last Active, Path). |
-| `uongsuadaubung-memory export [file.json]` | Export entire memory database to a JSON backup file (default: `memory-backup.json`). |
-| `uongsuadaubung-memory import <file.json>` | Import memory database entries from a JSON backup file. |
-| `uongsuadaubung-memory hook` | Execute PreInvocation Lifecycle Hook mode (used automatically by Antigravity). |
-| `uongsuadaubung-memory mcp` | Execute Stdio MCP JSON-RPC Server mode (used automatically by Antigravity IDE). |
-| `uongsuadaubung-memory help` | Display interactive TTY help banner and CLI subcommand usage. |
+| `apm-mcp install` | Purge existing installation, extract plugin to `~/.gemini/config/plugins/apm-mcp/`, and register User `PATH`. |
+| `apm-mcp uninstall` | Uninstall plugin, clean memory database directory (`~/.gemini/config/memory`), clean User `PATH`, and trigger background self-deletion. |
+| `apm-mcp export [file.json]` | Export entire memory database to a JSON backup file (default: `memory-backup.json`). |
+| `apm-mcp import <file.json>` | Import memory database entries from a JSON backup file. |
+| `apm-mcp hook` | Execute PreInvocation Lifecycle Hook mode (used automatically by Antigravity). |
+| `apm-mcp mcp` | Execute Stdio MCP JSON-RPC Server mode (used automatically by Antigravity IDE). |
+| `apm-mcp help` | Display interactive TTY help banner and CLI subcommand usage. |
 
 ---
 
-## 🛠️ Complete MCP Toolsuite for Agent (12 Unified Tools)
+## 🛠️ Complete MCP Toolsuite for Agent (14 Unified Tools)
 
-### 1. Project Management
+### 1. Project Management & Linking
 - **`get_or_create_project`**: Auto-detects workspace root via `.git`, `Cargo.toml`, `package.json`, etc., and hashes path to a 12-char deterministic ID.
   - *Args*: `name` (optional string), `path` (optional string)
-- **`list_projects`**: Returns all registered projects with ID, name, and memory count.
+- **`list_projects`**: Returns all registered projects with ID, name, memory count, and linked project IDs.
   - *Args*: None
+- **`link_projects`**: Link current project to 1 or more target projects to inherit their permanent rules.
+  - *Args*: `project_id` (string), `target_project_ids` (array of strings), `path` (optional string)
+- **`get_project_links`**: Get list of linked project IDs for a project.
+  - *Args*: `project_id` (string)
 - **`clear_project_memories`**: Deletes ALL memories for a project while keeping the project record (protected against `global`).
   - *Args*: `project_id` (string), `path` (optional string)
 - **`batch_delete_projects`**: Deletes 1 or multiple projects and all their stored memories (protected against `global`).
   - *Args*: `project_ids` (array of strings)
 
-### 2. Memory Operations (Unified Batch-First)
-- **`batch_add_memories`**: Add or smart-upsert 1 or multiple memory entries with auto-deduplication.
+### 2. Memory Operations (Unified Batch-First & Smart Upsert)
+- **`batch_add_memories`**: Add or smart-upsert 1 or multiple memory entries with Token Jaccard Similarity deduplication.
   - *Args*: `project_id` (string), `items` (array of `{ content, is_permanent, tags, metadata }`)
 - **`get_memories`**: Retrieve active stored memories ordered by permanence and recency.
   - *Args*: `project_id` (string), `limit` (number, default 100), `tags` (optional array), `is_permanent` (optional bool)
@@ -69,21 +73,23 @@ A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifec
 
 ---
 
-## 🤖 GitHub Actions CI/CD Pipeline (Manual Trigger)
+## 🤖 GitHub Actions CI/CD Pipeline (Single Release Flow)
 
-The repository includes a manual GitHub Actions workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)) triggered via `workflow_dispatch` (Click **Actions ➔ Run workflow**).
+The repository includes an automated multi-platform GitHub Actions workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)) triggered via `workflow_dispatch` (Click **Actions ➔ Run workflow**).
 
-When triggering the workflow, GitHub presents **multi-select checkboxes** allowing you to pick any combination of platforms:
-- ☑️ **Build Windows (x64)** (`uongsuadaubung-memory-windows-x64.exe`)
-- ☑️ **Build Linux (x64)** (`uongsuadaubung-memory-linux-x64`)
-- ☑️ **Build macOS (ARM64)** (`uongsuadaubung-memory-macos-arm64`)
+Features:
+- 🧹 Automatically purges previous releases and tags using `gh release delete --cleanup-tag`.
+- 📦 Publishes a single clean **Release `latest`** containing pre-compiled binaries:
+  - `apm-mcp-windows-x64.exe`
+  - `apm-mcp-linux-x64`
+  - `apm-mcp-macos-arm64`
 
 ---
 
 ## 🗄️ Database Location & Storage
 
 - **Database Path**: `~/.gemini/config/memory/memory.db` (`C:\Users\<username>\.gemini\config\memory\memory.db`)
-- **Engine**: SQLite with WAL mode, FTS5 virtual table `memories_fts`, and automatic SQL triggers (`memories_ai`, `memories_ad`, `memories_au`).
+- **Engine**: SQLite with WAL mode, FTS5 virtual table `memories_fts`, covering compound indexes, and automatic SQL triggers (`memories_ai`, `memories_ad`, `memories_au`).
 
 ---
 
@@ -91,14 +97,14 @@ When triggering the workflow, GitHub presents **multi-select checkboxes** allowi
 
 ```bash
 # Clone repository
-git clone https://github.com/uongsuadaubung/memory-mcp.git
-cd memory-mcp
+git clone https://github.com/uongsuadaubung/agy-plugin-memory.git
+cd agy-plugin-memory
 
 # Build optimized release binary
 cargo build --release
 
 # Re-install updated binary and embedded plugin assets
-target/release/uongsuadaubung-memory.exe install
+target/release/apm-mcp.exe install
 ```
 
 ## 📄 License

@@ -3,7 +3,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "uongsuadaubung-memory hook",
+        "command": "apm-mcp hook",
         "timeout": 10
       }
     ]
