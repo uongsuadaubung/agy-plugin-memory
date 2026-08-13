@@ -67,14 +67,15 @@ A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifec
 
 ---
 
-## 🤖 GitHub Actions CI/CD Pipeline
+## 🤖 GitHub Actions CI/CD Pipeline (Manual Trigger)
 
-The repository includes a GitHub Actions workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)) that automatically compiles release binaries for:
-- 🪟 **Windows x64** (`uongsuadaubung-memory-windows-x64.exe`)
-- 🐧 **Linux x64** (`uongsuadaubung-memory-linux-x64`)
-- 🍎 **macOS ARM64** (`uongsuadaubung-memory-macos-arm64`)
+The repository includes a manual GitHub Actions workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)) triggered via `workflow_dispatch` (Click **Actions ➔ Run workflow**).
 
-When you push a release tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`), GitHub Actions automatically attaches pre-built binaries to the GitHub Release!
+When triggering the workflow, you can select which platform to build:
+- 🌐 `all`: Build binaries for Windows, Linux, and macOS simultaneously
+- 🪟 `windows`: Build `uongsuadaubung-memory-windows-x64.exe` only
+- 🐧 `linux`: Build `uongsuadaubung-memory-linux-x64` only
+- 🍎 `macos`: Build `uongsuadaubung-memory-macos-arm64` only
 
 ---
 
