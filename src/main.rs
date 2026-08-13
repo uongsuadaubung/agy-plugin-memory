@@ -27,6 +27,10 @@ fn print_cli_help() {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("[FATAL PANIC in apm-mcp] {}", info);
+    }));
+
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map(|s| s.as_str());
 

@@ -48,7 +48,10 @@ pub fn hash_project_path(path: &Path) -> String {
 pub fn find_project_root(starting_path: Option<&str>) -> Result<PathBuf, String> {
     let start = match starting_path {
         Some(p) if !p.trim().is_empty() => PathBuf::from(p.trim()),
-        _ => return Err("No project path provided. Please specify an explicit path.".to_string()),
+        _ => match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => return Err("No project path provided and current working directory could not be determined.".to_string()),
+        },
     };
 
     let canonical = start.canonicalize().unwrap_or(start);

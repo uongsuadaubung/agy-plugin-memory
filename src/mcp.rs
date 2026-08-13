@@ -83,6 +83,10 @@ pub fn run_mcp_mode() {
             Err(_) => continue,
         };
 
+        if req.method.starts_with("notifications/") {
+            continue;
+        }
+
         let req_id = req.id.unwrap_or(Value::Null);
 
         match req.method.as_str() {
@@ -105,7 +109,15 @@ pub fn run_mcp_mode() {
                 send_response(&resp);
             }
 
-            "notifications/initialized" => {}
+            "ping" => {
+                let resp = JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: req_id,
+                    result: Some(json!({})),
+                    error: None,
+                };
+                send_response(&resp);
+            }
 
             "tools/list" => {
                 let tools = json!({
