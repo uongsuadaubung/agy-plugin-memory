@@ -71,11 +71,10 @@ A ultra-high-performance, standalone Model Context Protocol (MCP) server & Lifec
 
 The repository includes a manual GitHub Actions workflow ([`.github/workflows/build.yml`](.github/workflows/build.yml)) triggered via `workflow_dispatch` (Click **Actions ➔ Run workflow**).
 
-When triggering the workflow, you can select which platform to build:
-- 🌐 `all`: Build binaries for Windows, Linux, and macOS simultaneously
-- 🪟 `windows`: Build `uongsuadaubung-memory-windows-x64.exe` only
-- 🐧 `linux`: Build `uongsuadaubung-memory-linux-x64` only
-- 🍎 `macos`: Build `uongsuadaubung-memory-macos-arm64` only
+When triggering the workflow, GitHub presents **multi-select checkboxes** allowing you to pick any combination of platforms:
+- ☑️ **Build Windows (x64)** (`uongsuadaubung-memory-windows-x64.exe`)
+- ☑️ **Build Linux (x64)** (`uongsuadaubung-memory-linux-x64`)
+- ☑️ **Build macOS (ARM64)** (`uongsuadaubung-memory-macos-arm64`)
 
 ---
 

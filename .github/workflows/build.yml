@@ -3,21 +3,26 @@ name: Build Cross-Platform Binary (Manual Trigger)
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: 'Select platform to build'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - windows
-          - linux
-          - macos
+      build_windows:
+        description: 'Build Windows (x64)'
+        required: false
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build Linux (x64)'
+        required: false
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build macOS (ARM64)'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   build-windows:
     name: Build Windows (x64)
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
+    if: ${{ github.event.inputs.build_windows == 'true' }}
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
@@ -52,7 +57,7 @@ jobs:
 
   build-linux:
     name: Build Linux (x64)
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event.inputs.build_linux == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -88,7 +93,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
+    if: ${{ github.event.inputs.build_macos == 'true' }}
     runs-on: macos-latest
     steps:
       - name: Checkout Repository
