@@ -9,69 +9,6 @@ mod uninstall;
 use std::env;
 use std::io::{self, IsTerminal};
 
-#[cfg(target_os = "windows")]
-pub fn ensure_bin_in_user_path() {
-    if let Some(mut bin_dir) = dirs::home_dir() {
-        bin_dir.push(".gemini");
-        bin_dir.push("config");
-        bin_dir.push("plugins");
-        bin_dir.push("apm-mcp");
-        bin_dir.push("bin");
-
-        if bin_dir.exists() {
-            let bin_str = bin_dir.to_string_lossy().to_string();
-            let cmd = format!(
-                "$bin = '{}'; $old = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($old -notlike '*'+$bin+'*') {{ [Environment]::SetEnvironmentVariable('PATH', $old + ';' + $bin, 'User') }}",
-                bin_str
-            );
-
-            let _ = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", &cmd])
-                .output();
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn ensure_bin_in_user_path() {
-    if let Some(mut bin_dir) = dirs::home_dir() {
-        bin_dir.push(".gemini");
-        bin_dir.push("config");
-        bin_dir.push("plugins");
-        bin_dir.push("apm-mcp");
-        bin_dir.push("bin");
-
-        if bin_dir.exists() {
-            let bin_str = bin_dir.to_string_lossy().to_string();
-            let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("~"));
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let target_exe = bin_dir.join("apm-mcp");
-                if target_exe.exists() {
-                    let _ = std::fs::set_permissions(&target_exe, std::fs::Permissions::from_mode(0o755));
-                }
-            }
-
-            for rcfile in &[".zshrc", ".bashrc"] {
-                let rcpath = home.join(rcfile);
-                if rcpath.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&rcpath) {
-                        if !content.contains("apm-mcp/bin") {
-                            let export_line = format!("\nexport PATH=\"$PATH:{}\"\n", bin_str);
-                            let _ = std::fs::OpenOptions::new().append(true).open(&rcpath).and_then(|mut f| {
-                                use std::io::Write;
-                                f.write_all(export_line.as_bytes())
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn print_cli_help() {
     println!("apm-mcp - Memory MCP Server & Plugin (v1.0.0)");
     println!("--------------------------------------------------");
@@ -79,21 +16,17 @@ fn print_cli_help() {
     println!("Usage:");
     println!("  apm-mcp <COMMAND>\n");
     println!("Commands:");
-    println!("  install          Install plugin to ~/.gemini/config/plugins/apm-mcp & register PATH");
-    println!("  uninstall        Uninstall plugin and clean PATH");
+    println!("  install          Install plugin to ~/.gemini/config/plugins/apm-mcp");
+    println!("  uninstall        Uninstall plugin");
     println!("  export [file]    Export memory database to a JSON backup file (default: memory-backup.json)");
     println!("  import <file>    Import memory database from a JSON backup file");
     println!("  hook             Run PreInvocation Lifecycle Hook mode (used by Antigravity)");
-    println!("  mcp              Run Stdio MCP JSON-RPC Server mode (used by Antigravity IDE)");
-    println!("  help             Display this help message\n");
+    println!("  mcp              Run Stdio MCP JSON-RPC Server mode (used by Antigravity IDE)\n");
     println!("Example:");
     println!("  apm-mcp export");
 }
 
 fn main() {
-    #[cfg(target_os = "windows")]
-    ensure_bin_in_user_path();
-
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map(|s| s.as_str());
 
@@ -118,7 +51,7 @@ fn main() {
         Some("help") | Some("--help") | Some("-h") => {
             print_cli_help();
         }
-        Some("mcp") | Some("--mcp") => {
+        Some("mcp") | Some("--mcp") | Some("stdio") | Some("--stdio") | Some("-m") => {
             mcp::run_mcp_mode();
         }
         None => {
@@ -129,8 +62,13 @@ fn main() {
             }
         }
         Some(other) => {
-            println!("[ERROR] Unknown command: {}\n", other);
-            print_cli_help();
+            if !io::stdin().is_terminal() {
+                eprintln!("[ERROR] Unrecognized MCP command argument '{}', falling back to MCP mode.", other);
+                mcp::run_mcp_mode();
+            } else {
+                println!("[ERROR] Unknown command: {}\n", other);
+                print_cli_help();
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::io::{self, Read};
+use std::fmt::Write;
+use std::io::{self, Read, Write};
 
 use crate::db::{get_memories, get_or_create_project};
 use crate::project::find_project_root;
@@ -42,11 +43,17 @@ pub fn run_hook_mode() {
         }
     }
 
-    let root_path = find_project_root(if workspace_path.is_empty() {
+    let root_path = match find_project_root(if workspace_path.is_empty() {
         None
     } else {
         Some(&workspace_path)
-    });
+    }) {
+        Ok(p) => p,
+        Err(_) => {
+            println!("{}", json!({ "injectSteps": [] }));
+            return;
+        }
+    };
     let root_str = root_path.to_string_lossy();
 
     let project = match get_or_create_project(None, Some(&root_str), false) {
@@ -57,12 +64,10 @@ pub fn run_hook_mode() {
         }
     };
 
-    // Load ALL valid global & permanent rules + top short-term memories up to MAX_SHORT_TERM_MEMORIES
     let global_mems = get_memories("global", MAX_GLOBAL_MEMORIES, None, None, None).unwrap_or_default();
     let perm_mems = get_memories(&project.id, MAX_PERMANENT_MEMORIES, None, Some(true), Some(&root_str)).unwrap_or_default();
     let short_term_mems = get_memories(&project.id, MAX_SHORT_TERM_MEMORIES, None, Some(false), Some(&root_str)).unwrap_or_default();
 
-    // Load permanent rules for linked projects
     let mut linked_mems_by_proj: Vec<(String, Vec<crate::db::MemoryRecord>)> = Vec::new();
     for linked_id in &project.linked_project_ids {
         if linked_id != &project.id && linked_id != "global" {
@@ -78,33 +83,34 @@ pub fn run_hook_mode() {
         return;
     }
 
-    let mut ctx_text = format!("[Memory Context: {} | Project ID: {}]\n", project.name, project.id);
+    let mut ctx_text = String::with_capacity(1024);
+    let _ = writeln!(ctx_text, "[Memory Context: {} | Project ID: {}]", project.name, project.id);
 
     if !global_mems.is_empty() {
         ctx_text.push_str("\nGlobal User Rules:\n");
         for m in &global_mems {
-            ctx_text.push_str(&format!("- {}\n", m.content));
+            let _ = writeln!(ctx_text, "- {}", m.content);
         }
     }
 
     if !perm_mems.is_empty() {
         ctx_text.push_str("\nProject Permanent Rules:\n");
         for m in &perm_mems {
-            ctx_text.push_str(&format!("- {}\n", m.content));
+            let _ = writeln!(ctx_text, "- {}", m.content);
         }
     }
 
     for (linked_id, lmems) in &linked_mems_by_proj {
-        ctx_text.push_str(&format!("\nLinked Project Rules (from: {}):\n", linked_id));
+        let _ = writeln!(ctx_text, "\nLinked Project Rules (from: {}):", linked_id);
         for m in lmems {
-            ctx_text.push_str(&format!("- {}\n", m.content));
+            let _ = writeln!(ctx_text, "- {}", m.content);
         }
     }
 
     if !short_term_mems.is_empty() {
         ctx_text.push_str("\nProject Short-Term Memories:\n");
         for m in &short_term_mems {
-            ctx_text.push_str(&format!("- {}\n", m.content));
+            let _ = writeln!(ctx_text, "- {}", m.content);
         }
     }
 
@@ -114,5 +120,8 @@ pub fn run_hook_mode() {
         }],
     };
 
-    println!("{}", serde_json::to_string(&resp).unwrap());
+    if let Ok(s) = serde_json::to_string(&resp) {
+        println!("{}", s);
+        let _ = io::stdout().flush();
+    }
 }

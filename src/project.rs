@@ -1,6 +1,23 @@
 use md5::{Digest, Md5};
-use std::env;
 use std::path::{Path, PathBuf};
+
+const IDE_APP_PATTERNS: &[&str] = &[
+    "appdata/local/programs/antigravity ide",
+    "appdata/local/programs/antigravity",
+    "program files/antigravity ide",
+    "program files (x86)/antigravity ide",
+];
+
+const ROOT_MARKERS: &[&str] = &[
+    ".git",
+    "package.json",
+    "Cargo.toml",
+    "pyproject.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    ".antigravity",
+];
 
 #[derive(Debug, Clone)]
 pub struct DetectedProject {
@@ -10,13 +27,14 @@ pub struct DetectedProject {
 }
 
 pub fn normalize_path(path: &Path) -> String {
-    let s = path.to_string_lossy().to_string();
-    let clean = if s.starts_with(r"\\?\") {
-        &s[4..]
-    } else {
-        &s
-    };
+    let s = path.to_string_lossy();
+    let clean = s.strip_prefix(r"\\?\").unwrap_or(&s);
     clean.replace('\\', "/").to_lowercase()
+}
+
+pub fn is_ide_app_dir(path: &Path) -> bool {
+    let norm = normalize_path(path);
+    IDE_APP_PATTERNS.iter().any(|pattern| norm.contains(pattern))
 }
 
 pub fn hash_project_path(path: &Path) -> String {
@@ -27,47 +45,47 @@ pub fn hash_project_path(path: &Path) -> String {
     format!("{:x}", result)[..12].to_string()
 }
 
-pub fn find_project_root(starting_path: Option<&str>) -> PathBuf {
+pub fn find_project_root(starting_path: Option<&str>) -> Result<PathBuf, String> {
     let start = match starting_path {
-        Some(p) => PathBuf::from(p),
-        None => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        Some(p) if !p.trim().is_empty() => PathBuf::from(p.trim()),
+        _ => return Err("No project path provided. Please specify an explicit path.".to_string()),
     };
 
     let canonical = start.canonicalize().unwrap_or(start);
+
+    if is_ide_app_dir(&canonical) {
+        return Err(format!(
+            "Path '{}' is an IDE application installation directory, not a user project workspace.",
+            canonical.to_string_lossy()
+        ));
+    }
+
     let mut curr = canonical.as_path();
 
-    let root_markers = [
-        ".git",
-        "package.json",
-        "Cargo.toml",
-        "pyproject.toml",
-        "go.mod",
-        "pom.xml",
-        "build.gradle",
-        ".antigravity",
-    ];
-
     while let Some(parent) = curr.parent() {
-        for marker in &root_markers {
+        for marker in ROOT_MARKERS {
             if curr.join(marker).exists() {
-                return curr.to_path_buf();
+                return Ok(curr.to_path_buf());
             }
         }
         curr = parent;
     }
 
-    canonical
+    Ok(canonical)
 }
 
-pub fn get_auto_detected_project(name_override: Option<&str>, path_override: Option<&str>) -> DetectedProject {
-    let root = find_project_root(path_override);
+pub fn get_auto_detected_project(
+    name_override: Option<&str>,
+    path_override: Option<&str>,
+) -> Result<DetectedProject, String> {
+    let root = find_project_root(path_override)?;
     let id = hash_project_path(&root);
 
-    let clean_path = if root.to_string_lossy().starts_with(r"\\?\") {
-        root.to_string_lossy()[4..].to_string()
-    } else {
-        root.to_string_lossy().to_string()
-    };
+    let raw_str = root.to_string_lossy();
+    let clean_path = raw_str
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&raw_str)
+        .to_string();
 
     let name = match name_override {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),
@@ -77,9 +95,12 @@ pub fn get_auto_detected_project(name_override: Option<&str>, path_override: Opt
             .unwrap_or_else(|| "unknown-project".to_string()),
     };
 
-    DetectedProject {
+    Ok(DetectedProject {
         id,
         name,
         path: clean_path,
-    }
+    })
 }
+
+
+

@@ -31,7 +31,6 @@ An ultra-high-performance, standalone Model Context Protocol (MCP) server & Life
 | `apm-mcp import <file.json>` | Import memory database entries from a JSON backup file. |
 | `apm-mcp hook` | Execute PreInvocation Lifecycle Hook mode (used automatically by Antigravity). |
 | `apm-mcp mcp` | Execute Stdio MCP JSON-RPC Server mode (used automatically by Antigravity IDE). |
-| `apm-mcp help` | Display interactive TTY help banner and CLI subcommand usage. |
 
 ---
 

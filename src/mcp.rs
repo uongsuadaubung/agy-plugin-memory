@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 
 use crate::db::*;
 
@@ -23,6 +23,13 @@ struct JsonRpcResponse {
     error: Option<Value>,
 }
 
+fn send_response(resp: &JsonRpcResponse) {
+    if let Ok(s) = serde_json::to_string(resp) {
+        println!("{}", s);
+        let _ = io::stdout().flush();
+    }
+}
+
 fn format_memory_for_agent(m: &MemoryRecord) -> Value {
     let mut obj = json!({
         "id": m.id,
@@ -41,6 +48,25 @@ fn format_memory_for_agent(m: &MemoryRecord) -> Value {
 fn format_memories_for_agent(mems: &[MemoryRecord]) -> Value {
     let list: Vec<Value> = mems.iter().map(format_memory_for_agent).collect();
     json!({ "count": list.len(), "memories": list })
+}
+
+fn mcp_ok_val(val: &Value) -> Value {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string(val).unwrap_or_else(|_| "{}".to_string())
+        }]
+    })
+}
+
+fn mcp_err_str(err: impl std::fmt::Display) -> Value {
+    json!({
+        "isError": true,
+        "content": [{
+            "type": "text",
+            "text": format!("Error: {}", err)
+        }]
+    })
 }
 
 pub fn run_mcp_mode() {
@@ -76,7 +102,7 @@ pub fn run_mcp_mode() {
                     })),
                     error: None,
                 };
-                println!("{}", serde_json::to_string(&resp).unwrap());
+                send_response(&resp);
             }
 
             "notifications/initialized" => {}
@@ -258,6 +284,18 @@ pub fn run_mcp_mode() {
                                 },
                                 "required": ["project_id"]
                             }
+                        },
+                        {
+                            "name": "move_memories",
+                            "description": "Move 1 or multiple memories by ID array to another target project (e.g. workspace project ID or 'global'). Automatically resolves and updates source project counts.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "memory_ids": { "type": "array", "items": { "type": "string" }, "description": "Array of memory IDs to move" },
+                                    "target_project_id": { "type": "string", "description": "Target project ID to move memories into (e.g. workspace project ID or 'global')" }
+                                },
+                                "required": ["memory_ids", "target_project_id"]
+                            }
                         }
                     ]
                 });
@@ -268,7 +306,7 @@ pub fn run_mcp_mode() {
                     result: Some(tools),
                     error: None,
                 };
-                println!("{}", serde_json::to_string(&resp).unwrap());
+                send_response(&resp);
             }
 
             "tools/call" => {
@@ -281,8 +319,8 @@ pub fn run_mcp_mode() {
                         let name = args.get("name").and_then(|v| v.as_str());
                         let path = args.get("path").and_then(|v| v.as_str());
                         match get_or_create_project(name, path, true) {
-                            Ok(p) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count, "linked_project_ids": p.linked_project_ids })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(p) => mcp_ok_val(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count, "linked_project_ids": p.linked_project_ids })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -292,17 +330,17 @@ pub fn run_mcp_mode() {
                                 .iter()
                                 .map(|p| json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count }))
                                 .collect();
-                            json!({ "content": [{ "type": "text", "text": serde_json::to_string(&simple).unwrap() }] })
+                            mcp_ok_val(&json!(simple))
                         }
-                        Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                        Err(e) => mcp_err_str(e),
                     },
 
                     "clear_project_memories" => {
                         let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
                         let path = args.get("path").and_then(|v| v.as_str());
                         match clear_project_memories(project_id, path) {
-                            Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "deletedCount": count })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -313,8 +351,8 @@ pub fn run_mcp_mode() {
                             .unwrap_or_default();
 
                         match batch_delete_projects(project_ids) {
-                            Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "deletedCount": count })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -327,8 +365,8 @@ pub fn run_mcp_mode() {
                             .unwrap_or_default();
 
                         match batch_add_memories(project_id, items, path) {
-                            Ok(mems) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&format_memories_for_agent(&mems)).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -343,8 +381,8 @@ pub fn run_mcp_mode() {
                             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
                         match get_memories(project_id, limit, tags, is_perm, path) {
-                            Ok(mems) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&format_memories_for_agent(&mems)).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -355,17 +393,17 @@ pub fn run_mcp_mode() {
                         let path = args.get("path").and_then(|v| v.as_str());
 
                         match search_memories(project_id, query, limit, path) {
-                            Ok(mems) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&format_memories_for_agent(&mems)).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
                     "get_memory_by_id" => {
                         let memory_id = args.get("memory_id").and_then(|v| v.as_str()).unwrap_or("");
                         match get_memory_by_id(memory_id) {
-                            Ok(Some(m)) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&format_memory_for_agent(&m)).unwrap() }] }),
-                            Ok(None) => json!({ "isError": true, "content": [{ "type": "text", "text": "Memory ID not found" }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(Some(m)) => mcp_ok_val(&format_memory_for_agent(&m)),
+                            Ok(None) => mcp_err_str("Memory ID not found"),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -376,8 +414,8 @@ pub fn run_mcp_mode() {
                             .unwrap_or_default();
 
                         match batch_delete_memories(memory_ids) {
-                            Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "deletedCount": count })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -389,14 +427,14 @@ pub fn run_mcp_mode() {
                         let is_perm = args.get("is_permanent").and_then(|v| v.as_bool()).unwrap_or(false);
 
                         match batch_toggle_permanence(memory_ids, is_perm) {
-                            Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "updatedCount": count, "is_permanent": is_perm })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "updatedCount": count, "is_permanent": is_perm })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
                     "get_memory_stats" => match get_memory_stats() {
-                        Ok(stats) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&stats).unwrap() }] }),
-                        Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                        Ok(stats) => mcp_ok_val(&json!(stats)),
+                        Err(e) => mcp_err_str(e),
                     },
 
                     "cleanup_expired" => {
@@ -405,8 +443,8 @@ pub fn run_mcp_mode() {
                         let expire_days = args.get("expire_days").and_then(|v| v.as_i64()).unwrap_or(30);
 
                         match cleanup_expired(project_id, max_mems, expire_days, None) {
-                            Ok(count) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "success": true, "deletedCount": count })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
@@ -418,21 +456,30 @@ pub fn run_mcp_mode() {
                         let path = args.get("path").and_then(|v| v.as_str());
 
                         match link_projects(project_id, target_project_ids, path) {
-                            Ok(p) => json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "id": p.id, "linked_project_ids": p.linked_project_ids })).unwrap() }] }),
-                            Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("Error: {}", e) }] }),
+                            Ok(p) => mcp_ok_val(&json!({ "id": p.id, "linked_project_ids": p.linked_project_ids })),
+                            Err(e) => mcp_err_str(e),
                         }
                     }
 
                     "get_project_links" => {
                         let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
                         let linked = get_linked_project_ids(project_id);
-                        json!({ "content": [{ "type": "text", "text": serde_json::to_string(&json!({ "project_id": project_id, "linked_project_ids": linked })).unwrap() }] })
+                        mcp_ok_val(&json!({ "project_id": project_id, "linked_project_ids": linked }))
                     }
 
-                    _ => json!({
-                        "isError": true,
-                        "content": [{ "type": "text", "text": format!("Unknown tool: {}", tool_name) }]
-                    }),
+                    "move_memories" => {
+                        let memory_ids: Vec<String> = args.get("memory_ids")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                            .unwrap_or_default();
+                        let target_project_id = args.get("target_project_id").and_then(|v| v.as_str()).unwrap_or("");
+
+                        match move_memories(memory_ids, target_project_id) {
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "movedCount": count, "target_project_id": target_project_id })),
+                            Err(e) => mcp_err_str(e),
+                        }
+                    }
+
+                    _ => mcp_err_str(format!("Unknown tool: {}", tool_name)),
                 };
 
                 let resp = JsonRpcResponse {
@@ -441,7 +488,7 @@ pub fn run_mcp_mode() {
                     result: Some(tool_result),
                     error: None,
                 };
-                println!("{}", serde_json::to_string(&resp).unwrap());
+                send_response(&resp);
             }
 
             _ => {
@@ -451,7 +498,7 @@ pub fn run_mcp_mode() {
                     result: None,
                     error: Some(json!({ "code": -32601, "message": "Method not found" })),
                 };
-                println!("{}", serde_json::to_string(&resp).unwrap());
+                send_response(&resp);
             }
         }
     }

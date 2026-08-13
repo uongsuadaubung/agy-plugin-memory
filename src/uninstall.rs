@@ -1,29 +1,7 @@
 use std::env;
 use std::fs;
 
-#[cfg(target_os = "windows")]
-fn remove_bin_from_user_path() {
-    if let Some(mut bin_dir) = dirs::home_dir() {
-        bin_dir.push(".gemini");
-        bin_dir.push("config");
-        bin_dir.push("plugins");
-        bin_dir.push("apm-mcp");
-        bin_dir.push("bin");
 
-        let bin_str = bin_dir.to_string_lossy().to_string();
-        let cmd = format!(
-            "$bin = '{}'; $old = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($old -like '*'+$bin+'*') {{ $new = ($old -split ';' | Where-Object {{ $_ -ne $bin }}) -join ';'; [Environment]::SetEnvironmentVariable('PATH', $new, 'User') }}",
-            bin_str
-        );
-
-        let _ = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &cmd])
-            .output();
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn remove_bin_from_user_path() {}
 
 #[cfg(target_os = "windows")]
 fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
@@ -106,7 +84,5 @@ pub fn run_uninstall_mode() {
         }
     }
 
-    remove_bin_from_user_path();
-    println!("[CLEAN] Removed plugin bin directory from User PATH.");
     println!("[SUCCESS] apm-mcp successfully uninstalled!");
 }

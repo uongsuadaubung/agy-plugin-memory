@@ -9,15 +9,20 @@
 3. **Project Short-term Memories (`is_permanent: false`)**:
    - Stores recent session summaries & task progress (auto-expires in 30 days unless accessed).
 
+## Mandatory Project ID Requirement
+
+- Agent MUST extract the active `Project ID` from the injected header at the beginning of the prompt: `[Memory Context: ... | Project ID: <id>]` (e.g. `f3c8062bad7f`).
+- Agent MUST explicitly pass `project_id="<active_project_id>"` in all memory operations (`batch_add_memories`, `get_memories`, `search_memories`, `clear_project_memories`, `cleanup_expired`), unless `project_id="global"` is explicitly requested by the user.
+
 ## Proactive Agent Intelligence Guidelines
 
 1. **Auto-Log Task Progress**:
-   - Upon completing a major coding task, refactoring, or bugfix, Agent MUST automatically call `batch_add_memories(items=[{content="...", is_permanent: false, tags: ["progress"]}])` to record a 1-sentence progress summary.
+   - Upon completing a major coding task, refactoring, or bugfix, Agent MUST automatically call `batch_add_memories(project_id="<active_project_id>", items=[{content="...", is_permanent: false, tags: ["progress"]}])` to record a 1-sentence progress summary.
 2. **Project Architecture Learning**:
-   - On `/init-apm` or first chat interaction in a new project, Agent MUST inspect top-level workspace files and directories and automatically call `batch_add_memories(items=[{content="Project Architecture Tree...", is_permanent: true, tags: ["architecture"]}])` to map the module layout.
+   - On `/init-apm` or first chat interaction in a new project, Agent MUST inspect top-level workspace files and directories and automatically call `batch_add_memories(project_id="<active_project_id>", items=[{content="Project Architecture Tree...", is_permanent: true, tags: ["architecture"]}])` to map the module layout.
    - When new directories/modules are added, Agent MUST update this memory using `tags: ["architecture"]`.
 3. **Proactive Module & Error Search**:
-   - When debugging complex errors or working on specific modules, Agent MUST proactively call `search_memories(query="<module_or_error>")` to retrieve historical gotchas and past solutions.
+   - When debugging complex errors or working on specific modules, Agent MUST proactively call `search_memories(project_id="<active_project_id>", query="<module_or_error>")` to retrieve historical gotchas and past solutions.
 4. **Smart Tagging Requirement**:
    - Every memory created MUST include 1-3 standard lowercase tags (e.g. `["rust", "architecture", "bugfix"]`, `["database", "fts5"]`, `["workflow", "config"]`) for indexed categorization.
 
@@ -44,6 +49,7 @@
 
 ### Project Management & Linking
 - `get_or_create_project(name="...", path="...")`: Auto-detect active project workspace.
+- `list_projects()`: List all registered projects with memory counts.
 - `link_projects(project_id="...", target_project_ids=["p1"])`: Link current project to target projects.
 - `get_project_links(project_id="...")`: Get linked project IDs for a project.
 - `clear_project_memories(project_id="...")`: Delete ALL memories for a project.
@@ -54,6 +60,8 @@
 - `get_memories(project_id="...", limit=100, is_permanent=true)`: Retrieve valid memories.
 - `search_memories(project_id="...", query="...")`: FTS5 Full-Text BM25 relevance search across memories.
 - `get_memory_by_id(memory_id="...")`: Inspect a single memory by ID.
+- `move_memories(memory_ids=["id1"], target_project_id="...")`: Move 1 or more memories to target project ID (or 'global').
 - `batch_delete_memories(memory_ids=["id1"])`: Delete 1 or more memories by ID array.
 - `batch_toggle_permanence(memory_ids=["id1"], is_permanent=true)`: Toggle permanence for 1 or more memories by ID array.
+- `cleanup_expired(project_id="...", max_memories=50, expire_days=30)`: Retention cleanup for short-term memories.
 - `get_memory_stats()`: Get memory database usage statistics.

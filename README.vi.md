@@ -31,7 +31,6 @@ Hệ thống **Memory Model Context Protocol (MCP) Server & Lifecycle Hook Plugi
 | `apm-mcp import <file.json>` | Nhập dữ liệu trí nhớ từ file sao lưu JSON vào database. |
 | `apm-mcp hook` | Thực thi chế độ PreInvocation Lifecycle Hook (được Antigravity gọi tự động). |
 | `apm-mcp mcp` | Thực thi chế độ Stdio MCP JSON-RPC Server (được Antigravity IDE gọi tự động). |
-| `apm-mcp help` | Hiển thị bảng hướng dẫn CLI TTY tương tác. |
 
 ---
 
