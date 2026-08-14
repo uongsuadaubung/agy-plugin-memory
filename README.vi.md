@@ -34,7 +34,51 @@ Hệ thống **Memory Model Context Protocol (MCP) Server & Lifecycle Hook Plugi
 
 ---
 
-## 🛠️ Danh mục 14 MCP Tool dành cho AI
+## 📖 Hướng dẫn Sử dụng
+
+### 1. Cài đặt & Khởi chạy
+- Tải file `apm-mcp.exe` (Windows) hoặc `apm-mcp` (Linux/macOS) từ trang [Releases](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest), sau đó chạy lệnh:
+  ```bash
+  ./apm-mcp install
+  ```
+- Lệnh `install` sẽ tự động dọn bản cũ, copy file binary, cấu hình và quy tắc vào thư mục plugin (`~/.gemini/config/plugins/apm-mcp/`), sẵn sàng sử dụng ngay trên Antigravity IDE.
+
+> [!NOTE]
+> Hiện tại giao diện Antigravity IDE / CLI có thể chưa hiển thị trực quan tên plugin `apm-mcp` trong danh sách plugin. Để kiểm tra chắc chắn plugin đang hoạt động:
+> 1. **Thử yêu cầu lưu trí nhớ**: Bảo AI *"Lưu nhớ: dự án này ưu tiên dùng TypeScript cho frontend."*
+> 2. **Thử yêu cầu kiểm tra trí nhớ**: Bảo AI *"Kiểm tra xem hiện tại đang lưu những trí nhớ hay quy tắc gì."*
+> Nếu AI phản hồi xác nhận hoặc trả về danh sách trí nhớ đã lưu, `apm-mcp` đang hoạt động hoàn hảo ngầm bên dưới!
+
+### 2. Cơ chế Nạp Trí nhớ Tự động (Auto-Context Injection)
+Mỗi khi bạn gõ bất kỳ câu lệnh nào trong IDE, hệ thống sẽ tự động nạp ngầm các bối cảnh sau vào prompt của AI **trước khi AI suy nghĩ**:
+- **Quy tắc Toàn cục (Global Rules)**: Các sở thích cá nhân áp dụng cho mọi dự án (giải thích tiếng Việt, định dạng mã nguồn...).
+- **Quy tắc Vĩnh viễn (Project Permanent Rules)**: Kiến trúc, quy ước code, quy trình riêng của dự án hiện tại.
+- **Quy tắc Kế thừa (Linked Project Rules)**: Quy tắc được kế thừa từ các dự án khác trong cùng hệ sinh thái (`link_projects`).
+- **Tiến độ Ngắn hạn & Tìm kiếm Từ khóa**: 50 trí nhớ công việc gần nhất và các trí nhớ khớp với từ khóa trong câu lệnh của bạn (qua thuật toán FTS5 BM25).
+
+### 3. Cách Yêu cầu AI Lưu Trí nhớ
+Bạn chỉ cần ra lệnh tự nhiên với AI:
+- **Lưu quy tắc toàn cục**: *"Lưu nhớ: luôn dùng tiếng Việt khi giải thích mã nguồn"* ➔ AI tự lưu với `project_id="global"` và `is_permanent=true`.
+- **Lưu quy tắc dự án**: *"Lưu nhớ: dự án này dùng Async/Await và Repository Pattern"* ➔ AI tự lưu vào `project_id` của dự án với `is_permanent=true`.
+- **Lưu tiến độ**: AI tự động lưu 1 dòng tóm tắt sau khi hoàn thành refactor hoặc sửa bug lớn (`is_permanent=false`).
+
+### 4. Các Lệnh Workflow / Slash Command
+- **`/init-apm`**: Khởi tạo bối cảnh trí nhớ dự án. AI sẽ quét cây thư mục gốc và lưu sơ đồ kiến trúc (`tags: ["architecture"]`).
+- **`/memory`**: Xem bảng tổng hợp trí nhớ toàn cục, trí nhớ dự án, danh sách liên kết và quản lý/xóa/chỉnh sửa các mục trí nhớ.
+
+### 5. Sao lưu & Phôi phục Dữ liệu
+- **Xuất dữ liệu sao lưu (Export)**:
+  ```bash
+  apm-mcp export memory-backup.json
+  ```
+- **Nhập dữ liệu sao lưu (Import)**:
+  ```bash
+  apm-mcp import memory-backup.json
+  ```
+
+---
+
+## 🛠️ Danh mục 16 MCP Tool dành cho AI
 
 ### 1. Quản lý & Liên kết Dự án
 - **`get_project`**: Tự động nhận diện gốc dự án qua `.git`, `Cargo.toml`, `package.json`... và hash đường dẫn thành ID 12 ký tự duy nhất.
@@ -59,10 +103,14 @@ Hệ thống **Memory Model Context Protocol (MCP) Server & Lifecycle Hook Plugi
   - *Tham số*: `project_id` (bắt buộc), `query` (chuỗi từ khóa), `limit` (số lượng)
 - **`get_memory`**: Tra cứu thông tin một dòng trí nhớ theo Memory ID.
   - *Tham số*: `memory_id` (bắt buộc)
+- **`update_memory`**: Cập nhật trực tiếp nội dung, tag, metadata hoặc tính vĩnh viễn của một dòng trí nhớ.
+  - *Tham số*: `memory_id` (bắt buộc), `content` (tùy chọn), `tags` (tùy chọn), `metadata` (tùy chọn), `is_permanent` (tùy chọn)
 - **`delete_memories`**: Xóa hàng loạt trí nhớ theo mảng Memory ID.
   - *Tham số*: `memory_ids` (mảng chuỗi ID)
 - **`toggle_permanence`**: Cập nhật trạng thái vĩnh viễn cho hàng loạt trí nhớ.
   - *Tham số*: `memory_ids` (mảng chuỗi ID), `is_permanent` (boolean)
+- **`move_memories`**: Di chuyển hàng loạt trí nhớ sang dự án khác hoặc `global`.
+  - *Tham số*: `memory_ids` (mảng chuỗi ID), `target_project_id` (bắt buộc)
 
 ### 3. Phân tích & Bảo trì
 - **`memory_stats`**: Thống kê chỉ số sử dụng database (tổng dự án, tổng trí nhớ, vĩnh viễn vs ngắn hạn, dung lượng file).
@@ -92,19 +140,43 @@ Dự án tích hợp workflow tự động ([`.github/workflows/build.yml`](.git
 
 ---
 
-## 🔨 Biên dịch & Cài đặt từ Mã nguồn
+## 🛠️ Hướng dẫn Phát triển & Sửa Mã nguồn (Developer Guide)
+
+### 1. Yêu cầu Môi trường (Prerequisites)
+- **Rust Toolchain**: Rust 1.75+ (`cargo`, `rustc`). Tải tại [rustup.rs](https://rustup.rs/).
+- **Trình biên dịch C**: MSVC (Windows) hoặc GCC/Clang (Linux/macOS) để đóng gói SQLite tĩnh (`rusqlite bundled`).
+
+### 2. Cấu trúc Mã nguồn (Codebase Architecture)
+- `src/main.rs`: Điểm khởi chạy chương trình. Điều hướng các cờ CLI (`install`, `uninstall`, `export`, `import`, `hook`, `mcp`).
+- `src/mcp.rs`: Tầng MCP JSON-RPC Server. Định nghĩa 16 MCP tool trong `list_tools` và xử lý lệnh trong `call_tool`. **Chỉnh sửa file này nếu muốn thêm/rút gọn/sửa công cụ MCP.**
+- `src/db.rs`: Tầng cơ sở dữ liệu SQLite. Quản lý bảng `projects`, `memories`, FTS5 BM25 search, SQL trigger và thuật toán Smart Upsert.
+- `src/hook.rs`: Tầng Lifecycle PreInvocation Hook. Điều khiển việc tự động tiêm bối cảnh trí nhớ vào prompt của AI trước mỗi tin nhắn.
+- `src/similarity.rs`: Thuật toán tính độ tương đồng Token Jaccard & Negation Guard để loại bỏ trí nhớ trùng rác.
+- `src/install.rs`: Logic tự cài đặt (`--install`). Nhúng trực tiếp các file từ `plugins/apm-mcp/` vào file binary lúc biên dịch (`include_str!`).
+- `plugins/apm-mcp/`: Nơi chứa quy tắc ngầm (`rules/memory.md`), hướng dẫn agent (`instructions/memory.md`) và workflow (`workflows/`).
+
+### 3. Quy trình Sửa Code & Build Chi tiết
 
 ```bash
-# Clone repository
+# 1. Clone repository về máy
 git clone https://github.com/uongsuadaubung/agy-plugin-memory.git
 cd agy-plugin-memory
 
-# Biên dịch bản release tối ưu
+# 2. Tiến hành sửa mã nguồn trong src/ hoặc sửa quy tắc trong plugins/apm-mcp/
+
+# 3. Kiểm tra lỗi biên dịch & chạy toàn bộ 27 unit tests
+cargo check
+cargo test
+
+# 4. Biên dịch bản release tối ưu
 cargo build --release
 
-# Cài đặt file thực thi và plugin vào hệ thống
-target/release/apm-mcp.exe install
+# 5. Cài đặt đè bản mới vừa build vào hệ thống IDE
+target/release/apm-mcp install
 ```
+
+> [!TIP]
+> Do các tệp quy tắc trong `plugins/apm-mcp/` được nhúng trực tiếp vào file binary lúc biên dịch qua lệnh `include_str!`, chỉ cần chạy `cargo build --release` và `apm-mcp install` thì bản quy tắc mới sẽ tự động được giải nén vào `~/.gemini/config/plugins/apm-mcp/`.
 
 ## 📄 Bản quyền
 

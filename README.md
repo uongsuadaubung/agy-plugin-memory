@@ -34,7 +34,51 @@ An ultra-high-performance, standalone Model Context Protocol (MCP) server & Life
 
 ---
 
-## 🛠️ Complete MCP Toolsuite for Agent (14 Unified Tools)
+## 📖 User Guide
+
+### 1. Installation & Setup
+- Download `apm-mcp.exe` (or `apm-mcp` on Linux/macOS) from [Releases](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest), then run in terminal:
+  ```bash
+  ./apm-mcp install
+  ```
+- Running `install` automatically cleans old builds, copies the binary, configs, and rule manifests into `~/.gemini/config/plugins/apm-mcp/`, making it instantly ready across all IDE workspaces.
+
+> [!NOTE]
+> Currently, the Antigravity IDE or CLI UI might not visually display `apm-mcp` in the plugin list UI. To verify it is active and working properly:
+> 1. **Try saving a rule**: Ask the AI *"Remember that I prefer TypeScript for frontend code."*
+> 2. **Try inspecting memory**: Ask the AI *"Check what memories or rules are currently saved."*
+> If the AI confirms or retrieves your saved record, `apm-mcp` is running and active!
+
+### 2. How Memory Auto-Injection Works
+Every time you type a prompt in the IDE, `apm-mcp` automatically enriches the AI's prompt context *before* the AI generates a response:
+- **Global User Rules**: Universal preferences independent of project context (e.g., coding style, language preferences).
+- **Project Permanent Rules**: Repository-specific architecture guidelines, tech stack constraints, and coding conventions.
+- **Linked Project Rules**: Permanent rules inherited from cross-project dependencies (`link_projects`).
+- **Short-Term Progress & Keyword Matches**: Top recent task progress entries and real-time BM25 full-text search matches based on your active prompt keywords.
+
+### 3. How to Save Rules & Memories
+Simply talk to the AI agent in plain language:
+- **Global Preference**: *"Remember that I prefer English comments across all projects."* ➔ Agent saves to `project_id="global"` with `is_permanent=true`.
+- **Project Convention**: *"Remember that we use Repository Pattern for database access."* ➔ Agent saves to active `project_id` with `is_permanent=true`.
+- **Session Progress**: The agent auto-logs progress notes (`is_permanent=false`) when completing key tasks or refactors.
+
+### 4. Workflows & Slash Commands
+- **`/init-apm`**: Initialize project memory context. Scans top-level workspace layout and creates an Architecture Map memory (`tags: ["architecture"]`).
+- **`/memory`**: Inspect, filter, and manage stored project & global rules, project links, or cleanup old short-term entries.
+
+### 5. Backup & Migration
+- **Exporting Data**:
+  ```bash
+  apm-mcp export my-memory-backup.json
+  ```
+- **Importing Data**:
+  ```bash
+  apm-mcp import my-memory-backup.json
+  ```
+
+---
+
+## 🛠️ Complete MCP Toolsuite for Agent (16 Unified Tools)
 
 ### 1. Project Management & Linking
 - **`get_project`**: Auto-detects workspace root via `.git`, `Cargo.toml`, `package.json`, etc., and hashes path to a 12-char deterministic ID.
@@ -59,10 +103,14 @@ An ultra-high-performance, standalone Model Context Protocol (MCP) server & Life
   - *Args*: `project_id` (string), `query` (string), `limit` (number)
 - **`get_memory`**: Inspect a single memory record by its memory ID.
   - *Args*: `memory_id` (string)
+- **`update_memory`**: Directly update an existing memory record's content, tags, metadata, or permanence.
+  - *Args*: `memory_id` (string), `content` (optional string), `tags` (optional array), `metadata` (optional object), `is_permanent` (optional bool)
 - **`delete_memories`**: Delete 1 or multiple memories by ID array.
   - *Args*: `memory_ids` (array of strings)
 - **`toggle_permanence`**: Update permanence flag for 1 or multiple memories by ID array.
   - *Args*: `memory_ids` (array of strings), `is_permanent` (bool)
+- **`move_memories`**: Move 1 or multiple memories by ID array to another project or `global`.
+  - *Args*: `memory_ids` (array of strings), `target_project_id` (string)
 
 ### 3. Analytics & Maintenance
 - **`memory_stats`**: Get memory database usage analytics (total projects, total memories, permanent vs short-term, database byte size).
@@ -92,19 +140,43 @@ Features:
 
 ---
 
-## 🔨 Building & Updating from Source
+## 🛠️ Developer Guide (Building & Modifying Code)
+
+### 1. Prerequisites
+- **Rust Toolchain**: Rust 1.75+ (`cargo`, `rustc`). Install via [rustup.rs](https://rustup.rs/).
+- **C Compiler**: MSVC (Windows) or GCC/Clang (Linux/macOS) for bundling static SQLite (`rusqlite`).
+
+### 2. Codebase Architecture
+- `src/main.rs`: Application entry point. Routes CLI flags (`install`, `uninstall`, `export`, `import`, `hook`, `mcp`).
+- `src/mcp.rs`: MCP JSON-RPC Server layer. Defines all 16 MCP tool schemas in `list_tools` and handles tool calls in `call_tool`. **Edit this file to add or modify MCP tools.**
+- `src/db.rs`: SQLite database layer. Manages `projects`, `memories`, FTS5 BM25 search tables, triggers, and Smart Upsert.
+- `src/hook.rs`: Lifecycle PreInvocation Hook. Controls automatic context injection prior to every prompt execution.
+- `src/similarity.rs`: Token Jaccard similarity calculation & Negation Guard algorithm for memory deduplication.
+- `src/install.rs`: Self-installation logic. Embeds assets from `plugins/apm-mcp/` into binary at compile time (`include_str!`).
+- `plugins/apm-mcp/`: Plugin rule manifests (`rules/memory.md`), agent instructions (`instructions/memory.md`), and slash workflows (`workflows/`).
+
+### 3. Step-by-Step Development & Build Flow
 
 ```bash
-# Clone repository
+# 1. Clone repository
 git clone https://github.com/uongsuadaubung/agy-plugin-memory.git
 cd agy-plugin-memory
 
-# Build optimized release binary
+# 2. Make your edits to src/ or plugins/apm-mcp/
+
+# 3. Verify compilation and run all 27 unit tests
+cargo check
+cargo test
+
+# 4. Build optimized release binary
 cargo build --release
 
-# Re-install updated binary and embedded plugin assets
-target/release/apm-mcp.exe install
+# 5. Re-install updated binary & embedded plugin assets directly into your IDE
+target/release/apm-mcp install
 ```
+
+> [!TIP]
+> Because plugin rule files in `plugins/apm-mcp/` are embedded into the binary at compile time via Rust's `include_str!`, running `cargo build --release` and `apm-mcp install` will automatically unpack your updated rules into `~/.gemini/config/plugins/apm-mcp/`.
 
 ## 📄 License
 
