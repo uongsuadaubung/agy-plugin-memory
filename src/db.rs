@@ -2,44 +2,11 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::project::get_auto_detected_project;
-
-fn tokenize_text(text: &str) -> HashSet<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|s| !s.is_empty() && s.len() > 1)
-        .map(|s| s.to_string())
-        .collect()
-}
-
-fn is_similar_or_replacement(new_text: &str, old_text: &str) -> bool {
-    let lower_new = new_text.to_lowercase();
-    let lower_old = old_text.to_lowercase();
-
-    if lower_new == lower_old || lower_new.contains(&lower_old) || lower_old.contains(&lower_new) {
-        return true;
-    }
-
-    let set1 = tokenize_text(new_text);
-    let set2 = tokenize_text(old_text);
-
-    if set1.is_empty() || set2.is_empty() {
-        return false;
-    }
-
-    let intersection_count = set1.intersection(&set2).count();
-    let union_count = set1.union(&set2).count();
-    let min_count = set1.len().min(set2.len());
-
-    let jaccard = (intersection_count as f64) / (union_count as f64);
-    let overlap_min = (intersection_count as f64) / (min_count as f64);
-
-    jaccard >= 0.60 || (min_count >= 2 && overlap_min >= 0.75)
-}
+use crate::similarity::is_similar_or_replacement;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectRecord {

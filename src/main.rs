@@ -4,6 +4,7 @@ mod hook;
 mod install;
 mod mcp;
 mod project;
+mod similarity;
 mod uninstall;
 
 use std::env;

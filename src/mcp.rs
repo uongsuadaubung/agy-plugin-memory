@@ -69,6 +69,130 @@ fn mcp_err_str(err: impl std::fmt::Display) -> Value {
     })
 }
 
+struct ObjectBuilder {
+    properties: Value,
+    required: Vec<&'static str>,
+}
+
+impl ObjectBuilder {
+    fn new() -> Self {
+        Self {
+            properties: json!({}),
+            required: Vec::new(),
+        }
+    }
+
+    fn string(mut self, name: &'static str, desc: &'static str) -> Self {
+        self.properties[name] = json!({ "type": "string", "description": desc });
+        self
+    }
+
+    fn bool_flag(mut self, name: &'static str, desc: &'static str) -> Self {
+        self.properties[name] = json!({ "type": "boolean", "description": desc });
+        self
+    }
+
+    fn string_array(mut self, name: &'static str, desc: &'static str) -> Self {
+        self.properties[name] = json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": desc
+        });
+        self
+    }
+
+    fn object(mut self, name: &'static str, desc: &'static str) -> Self {
+        self.properties[name] = json!({ "type": "object", "description": desc });
+        self
+    }
+
+    fn required(mut self, req_fields: &[&'static str]) -> Self {
+        self.required.extend_from_slice(req_fields);
+        self
+    }
+
+    fn build(self) -> Value {
+        let mut obj = json!({
+            "type": "object",
+            "properties": self.properties
+        });
+        if !self.required.is_empty() {
+            obj["required"] = json!(self.required);
+        }
+        obj
+    }
+}
+
+struct ToolBuilder {
+    name: &'static str,
+    description: &'static str,
+    schema: Value,
+}
+
+impl ToolBuilder {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            description: "",
+            schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        }
+    }
+
+    fn description(mut self, desc: &'static str) -> Self {
+        self.description = desc;
+        self
+    }
+
+    fn add_string_param(mut self, param_name: &'static str, desc: &'static str) -> Self {
+        self.schema["properties"][param_name] = json!({ "type": "string", "description": desc });
+        self
+    }
+
+    fn add_number_param(mut self, param_name: &'static str, default_val: u64, desc: &'static str) -> Self {
+        self.schema["properties"][param_name] = json!({ "type": "number", "default": default_val, "description": desc });
+        self
+    }
+
+    fn add_bool_param(mut self, param_name: &'static str, desc: &'static str) -> Self {
+        self.schema["properties"][param_name] = json!({ "type": "boolean", "description": desc });
+        self
+    }
+
+    fn add_array_param(mut self, param_name: &'static str, item_type: &'static str, desc: &'static str) -> Self {
+        self.schema["properties"][param_name] = json!({
+            "type": "array",
+            "items": { "type": item_type },
+            "description": desc
+        });
+        self
+    }
+
+    fn add_object_array_param(mut self, param_name: &'static str, item_schema: Value, desc: &'static str) -> Self {
+        self.schema["properties"][param_name] = json!({
+            "type": "array",
+            "items": item_schema,
+            "description": desc
+        });
+        self
+    }
+
+    fn required_params(mut self, req_fields: &[&'static str]) -> Self {
+        self.schema["required"] = json!(req_fields);
+        self
+    }
+
+    fn build(self) -> Value {
+        json!({
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": self.schema,
+        })
+    }
+}
+
 pub fn run_mcp_mode() {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
@@ -120,202 +244,125 @@ pub fn run_mcp_mode() {
             }
 
             "tools/list" => {
-                let tools = json!({
-                    "tools": [
-                        {
-                            "name": "get_or_create_project",
-                            "description": "Auto-detect current working directory project or get/create a project by name or path.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "name": { "type": "string", "description": "Optional project display name" },
-                                    "path": { "type": "string", "description": "Optional absolute path to project directory" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "list_projects",
-                            "description": "List all registered projects in the memory database.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {}
-                            }
-                        },
-                        {
-                            "name": "clear_project_memories",
-                            "description": "Delete ALL memories (both permanent and short-term) for a project.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Unique Project ID" },
-                                    "path": { "type": "string", "description": "Optional project directory path" }
-                                },
-                                "required": ["project_id"]
-                            }
-                        },
-                        {
-                            "name": "batch_delete_projects",
-                            "description": "Batch delete 1 or multiple projects by an array of project IDs.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_ids": { "type": "array", "items": { "type": "string" }, "description": "List of project IDs to delete" }
-                                },
-                                "required": ["project_ids"]
-                            }
-                        },
-                        {
-                            "name": "batch_add_memories",
-                            "description": "Add or smart-upsert 1 or multiple memory entries at once.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Unique Project ID" },
-                                    "items": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "content": { "type": "string" },
-                                                "tags": { "type": "array", "items": { "type": "string" } },
-                                                "metadata": { "type": "object" },
-                                                "is_permanent": { "type": "boolean" }
-                                            },
-                                            "required": ["content"]
-                                        }
-                                    },
-                                    "path": { "type": "string", "description": "Optional project path" }
-                                },
-                                "required": ["project_id", "items"]
-                            }
-                        },
-                        {
-                            "name": "get_memories",
-                            "description": "Retrieve valid stored memories for a project.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Unique Project ID" },
-                                    "limit": { "type": "number", "default": 100, "description": "Maximum number of memories to return" },
-                                    "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter tags" },
-                                    "is_permanent": { "type": "boolean", "description": "Filter permanent or short-term" },
-                                    "path": { "type": "string", "description": "Optional project path" }
-                                },
-                                "required": ["project_id"]
-                            }
-                        },
-                        {
-                            "name": "search_memories",
-                            "description": "FTS5 Full-Text BM25 relevance search across memories content and tags.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Unique Project ID" },
-                                    "query": { "type": "string", "description": "Search query / keyword" },
-                                    "limit": { "type": "number", "default": 100, "description": "Maximum results" },
-                                    "path": { "type": "string", "description": "Optional project path" }
-                                },
-                                "required": ["project_id", "query"]
-                            }
-                        },
-                        {
-                            "name": "get_memory_by_id",
-                            "description": "Retrieve a single memory record by its unique memory ID.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "memory_id": { "type": "string", "description": "Memory ID to inspect" }
-                                },
-                                "required": ["memory_id"]
-                            }
-                        },
-                        {
-                            "name": "batch_delete_memories",
-                            "description": "Batch delete 1 or multiple memories by an array of memory IDs.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "memory_ids": { "type": "array", "items": { "type": "string" }, "description": "List of memory IDs to delete" }
-                                },
-                                "required": ["memory_ids"]
-                            }
-                        },
-                        {
-                            "name": "batch_toggle_permanence",
-                            "description": "Batch update permanence flag for 1 or multiple memories by ID array.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "memory_ids": { "type": "array", "items": { "type": "string" } },
-                                    "is_permanent": { "type": "boolean" }
-                                },
-                                "required": ["memory_ids", "is_permanent"]
-                            }
-                        },
-                        {
-                            "name": "get_memory_stats",
-                            "description": "Get memory database usage statistics (projects, memories, db size).",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {}
-                            }
-                        },
-                        {
-                            "name": "cleanup_expired",
-                            "description": "Retention cleanup for short-term memories older than 30 days.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Unique Project ID" },
-                                    "max_memories": { "type": "number", "default": 50 },
-                                    "expire_days": { "type": "number", "default": 30 }
-                                },
-                                "required": ["project_id"]
-                            }
-                        },
-                        {
-                            "name": "link_projects",
-                            "description": "Link current project to 1 or more target projects to inherit their permanent rules.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Current Project ID" },
-                                    "target_project_ids": { "type": "array", "items": { "type": "string" }, "description": "Array of target project IDs to link" },
-                                    "path": { "type": "string", "description": "Optional directory path" }
-                                },
-                                "required": ["project_id", "target_project_ids"]
-                            }
-                        },
-                        {
-                            "name": "get_project_links",
-                            "description": "Get linked project IDs for a project.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "project_id": { "type": "string", "description": "Project ID" }
-                                },
-                                "required": ["project_id"]
-                            }
-                        },
-                        {
-                            "name": "move_memories",
-                            "description": "Move 1 or multiple memories by ID array to another target project (e.g. workspace project ID or 'global'). Automatically resolves and updates source project counts.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "memory_ids": { "type": "array", "items": { "type": "string" }, "description": "Array of memory IDs to move" },
-                                    "target_project_id": { "type": "string", "description": "Target project ID to move memories into (e.g. workspace project ID or 'global')" }
-                                },
-                                "required": ["memory_ids", "target_project_id"]
-                            }
-                        }
-                    ]
-                });
+                let tools_list = vec![
+                    ToolBuilder::new("get_or_create_project")
+                        .description("Get an existing project by name/path or create a new one.")
+                        .add_string_param("name", "Project name")
+                        .add_string_param("path", "Project directory path")
+                        .required_params(&["name"])
+                        .build(),
+
+                    ToolBuilder::new("list_projects")
+                        .description("List all registered projects in the memory database.")
+                        .build(),
+
+                    ToolBuilder::new("clear_project_memories")
+                        .description("Delete ALL memories (both permanent and short-term) for a project.")
+                        .add_string_param("project_id", "Unique Project ID")
+                        .add_string_param("path", "Optional project directory path")
+                        .required_params(&["project_id"])
+                        .build(),
+
+                    ToolBuilder::new("batch_delete_projects")
+                        .description("Batch delete 1 or multiple projects by an array of project IDs.")
+                        .add_array_param("project_ids", "string", "List of project IDs to delete")
+                        .required_params(&["project_ids"])
+                        .build(),
+
+                    ToolBuilder::new("batch_add_memories")
+                        .description("Add or smart-upsert 1 or multiple memory entries at once.")
+                        .add_string_param("project_id", "Unique Project ID")
+                        .add_string_param("path", "Optional project path")
+                        .add_object_array_param(
+                            "items",
+                            ObjectBuilder::new()
+                                .string("content", "Memory content text")
+                                .string_array("tags", "Optional tags array")
+                                .object("metadata", "Optional metadata object")
+                                .bool_flag("is_permanent", "Whether memory is permanent")
+                                .required(&["content"])
+                                .build(),
+                            "Array of memory entries to add or update"
+                        )
+                        .required_params(&["project_id", "items"])
+                        .build(),
+
+                    ToolBuilder::new("get_memories")
+                        .description("Retrieve valid stored memories for a project.")
+                        .add_string_param("project_id", "Unique Project ID")
+                        .add_number_param("limit", 100, "Maximum number of memories to return")
+                        .add_array_param("tags", "string", "Filter tags")
+                        .add_bool_param("is_permanent", "Filter permanent or short-term")
+                        .add_string_param("path", "Optional project path")
+                        .required_params(&["project_id"])
+                        .build(),
+
+                    ToolBuilder::new("search_memories")
+                        .description("FTS5 Full-Text BM25 relevance search across memories content and tags.")
+                        .add_string_param("project_id", "Unique Project ID")
+                        .add_string_param("query", "Search query / keyword")
+                        .add_number_param("limit", 100, "Maximum results")
+                        .add_string_param("path", "Optional project path")
+                        .required_params(&["project_id", "query"])
+                        .build(),
+
+                    ToolBuilder::new("get_memory_by_id")
+                        .description("Retrieve a single memory record by its unique memory ID.")
+                        .add_string_param("memory_id", "Memory ID to inspect")
+                        .required_params(&["memory_id"])
+                        .build(),
+
+                    ToolBuilder::new("batch_delete_memories")
+                        .description("Batch delete 1 or multiple memories by an array of memory IDs.")
+                        .add_array_param("memory_ids", "string", "List of memory IDs to delete")
+                        .required_params(&["memory_ids"])
+                        .build(),
+
+                    ToolBuilder::new("batch_toggle_permanence")
+                        .description("Batch update permanence flag for 1 or multiple memories by ID array.")
+                        .add_array_param("memory_ids", "string", "List of memory IDs")
+                        .add_bool_param("is_permanent", "New permanence state")
+                        .required_params(&["memory_ids", "is_permanent"])
+                        .build(),
+
+                    ToolBuilder::new("get_memory_stats")
+                        .description("Get memory database usage statistics (projects, memories, db size).")
+                        .build(),
+
+                    ToolBuilder::new("cleanup_expired")
+                        .description("Retention cleanup for short-term memories older than 30 days.")
+                        .add_string_param("project_id", "Unique Project ID")
+                        .add_number_param("max_memories", 50, "Maximum short-term memories to retain")
+                        .add_number_param("expire_days", 30, "Expiration age in days")
+                        .required_params(&["project_id"])
+                        .build(),
+
+                    ToolBuilder::new("link_projects")
+                        .description("Link current project to 1 or more target projects to inherit their permanent rules.")
+                        .add_string_param("project_id", "Current Project ID")
+                        .add_array_param("target_project_ids", "string", "Array of target project IDs to link")
+                        .add_string_param("path", "Optional directory path")
+                        .required_params(&["project_id", "target_project_ids"])
+                        .build(),
+
+                    ToolBuilder::new("get_project_links")
+                        .description("Get linked project IDs for a project.")
+                        .add_string_param("project_id", "Project ID")
+                        .required_params(&["project_id"])
+                        .build(),
+
+                    ToolBuilder::new("move_memories")
+                        .description("Move 1 or multiple memories by ID array to another target project (e.g. workspace project ID or 'global'). Automatically resolves and updates source project counts.")
+                        .add_array_param("memory_ids", "string", "Array of memory IDs to move")
+                        .add_string_param("target_project_id", "Target project ID to move memories into (e.g. workspace project ID or 'global')")
+                        .required_params(&["memory_ids", "target_project_id"])
+                        .build(),
+                ];
 
                 let resp = JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: req_id,
-                    result: Some(tools),
+                    result: Some(json!({ "tools": tools_list })),
                     error: None,
                 };
                 send_response(&resp);
