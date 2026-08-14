@@ -11,12 +11,9 @@ const WORKFLOWS_INIT_MD: &str = include_str!("../plugins/apm-mcp/workflows/init-
 const WORKFLOWS_MEMORY_MD: &str = include_str!("../plugins/apm-mcp/workflows/memory.md");
 
 pub fn run_install_mode() {
-    let mut plugin_dir = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            println!("[ERROR] Could not resolve home directory.");
-            return;
-        }
+    let Some(mut plugin_dir) = dirs::home_dir() else {
+        println!("[ERROR] Could not resolve home directory.");
+        return;
     };
 
     plugin_dir.push(".gemini");
@@ -71,12 +68,12 @@ pub fn run_install_mode() {
 
     let mcp_config = MCP_CONFIG_JSON.replace(
         "\"command\": \"apm-mcp\"",
-        &format!("\"command\": \"{}\"", target_exe_str),
+        &format!("\"command\": \"{target_exe_str}\""),
     );
 
     let hooks_config = HOOKS_JSON.replace(
         "\"command\": \"apm-mcp hook\"",
-        &format!("\"command\": \"\\\"{}\\\" hook\"", target_exe_str),
+        &format!("\"command\": \"\\\"{target_exe_str}\\\" hook\""),
     );
 
     let _ = fs::write(plugin_dir.join("plugin.json"), PLUGIN_JSON);
@@ -87,9 +84,7 @@ pub fn run_install_mode() {
     let _ = fs::write(workflows_dir.join("init-apm.md"), WORKFLOWS_INIT_MD);
     let _ = fs::write(workflows_dir.join("memory.md"), WORKFLOWS_MEMORY_MD);
 
-    println!(
-        "[SUCCESS] apm-mcp successfully installed to: {}",
-        plugin_dir.display()
-    );
+    let display = plugin_dir.display();
+    println!("[SUCCESS] apm-mcp successfully installed to: {display}");
     println!("Binary copied with absolute path configs. Ready to use across all projects!");
 }

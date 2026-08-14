@@ -7,8 +7,7 @@ use std::fs;
 fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
     let dir_str = plugin_dir.to_string_lossy();
     let ps_cmd = format!(
-        "$p = '{}'; for ($i=0; $i -lt 5; $i++) {{ Start-Sleep -Seconds 1; if (Test-Path $p) {{ Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue }} else {{ break }} }}",
-        dir_str
+        "$p = '{dir_str}'; for ($i=0; $i -lt 5; $i++) {{ Start-Sleep -Seconds 1; if (Test-Path $p) {{ Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue }} else {{ break }} }}"
     );
 
     let _ = std::process::Command::new("powershell")
@@ -19,19 +18,16 @@ fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
 #[cfg(not(target_os = "windows"))]
 fn schedule_delayed_deletion(plugin_dir: &std::path::Path) {
     let dir_str = plugin_dir.to_string_lossy();
-    let sh_cmd = format!("for i in 1 2 3 4 5; do sleep 1; if [ -d '{}' ]; then rm -rf '{}'; else break; fi; done", dir_str, dir_str);
+    let sh_cmd = format!("for i in 1 2 3 4 5; do sleep 1; if [ -d '{dir_str}' ]; then rm -rf '{dir_str}'; else break; fi; done");
     let _ = std::process::Command::new("sh")
         .args(["-c", &sh_cmd])
         .spawn();
 }
 
 pub fn run_uninstall_mode() {
-    let mut plugin_dir = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            println!("[ERROR] Could not resolve home directory.");
-            return;
-        }
+    let Some(mut plugin_dir) = dirs::home_dir() else {
+        println!("[ERROR] Could not resolve home directory.");
+        return;
     };
 
     plugin_dir.push(".gemini");
@@ -62,10 +58,12 @@ pub fn run_uninstall_mode() {
             schedule_delayed_deletion(&plugin_dir);
             println!("[INFO] Scheduled background self-deletion on exit.");
         } else {
-            println!("[CLEAN] Plugin directory removed: {}", plugin_dir.display());
+            let display = plugin_dir.display();
+            println!("[CLEAN] Plugin directory removed: {display}");
         }
     } else {
-        println!("[INFO] Plugin directory does not exist: {}", plugin_dir.display());
+        let display = plugin_dir.display();
+        println!("[INFO] Plugin directory does not exist: {display}");
     }
 
     // Remove memory database directory (~/.gemini/config/memory)
@@ -79,7 +77,8 @@ pub fn run_uninstall_mode() {
                 schedule_delayed_deletion(&mem_dir);
                 println!("[INFO] Scheduled background memory database directory self-deletion on exit.");
             } else {
-                println!("[CLEAN] Memory database directory removed: {}", mem_dir.display());
+                let display = mem_dir.display();
+                println!("[CLEAN] Memory database directory removed: {display}");
             }
         }
     }

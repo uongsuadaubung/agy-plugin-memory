@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -88,11 +89,11 @@ static NEGATION_PHRASES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     ]
 });
 
-fn normalize_token(token: &str) -> String {
+fn normalize_token<'a>(token: &'a str) -> Cow<'a, str> {
     if let Some(&target) = SINGLE_WORD_ALIASES.get(token) {
-        target.to_string()
+        Cow::Borrowed(target)
     } else {
-        token.to_string()
+        Cow::Borrowed(token)
     }
 }
 
@@ -120,21 +121,24 @@ pub fn tokenize_text(text: &str) -> HashSet<String> {
 
     let tokens: HashSet<String> = normalized
         .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .map(|s| normalize_token(s))
+        .map(normalize_token)
         .filter(|s| !s.is_empty() && s.len() > 1 && !is_stop_word(s))
+        .map(Cow::into_owned)
         .collect();
 
     if tokens.is_empty() {
         normalized
             .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .map(|s| normalize_token(s))
+            .map(normalize_token)
             .filter(|s| !s.is_empty() && s.len() > 1)
+            .map(Cow::into_owned)
             .collect()
     } else {
         tokens
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 pub fn is_similar_or_replacement(new_text: &str, old_text: &str) -> bool {
     let lower_new = new_text.to_lowercase();
     let lower_old = old_text.to_lowercase();

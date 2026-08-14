@@ -3,7 +3,7 @@ use serde_json::json;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Read, Write as IoWrite};
 
-use crate::db::{get_memories, get_or_create_project};
+use crate::db::{get_memories, get_or_create_project, search_memories};
 use crate::project::find_project_root;
 
 pub const MAX_GLOBAL_MEMORIES: usize = 1000;
@@ -14,6 +14,10 @@ pub const MAX_SHORT_TERM_MEMORIES: usize = 50;
 struct HookPayload {
     #[serde(rename = "workspacePaths")]
     workspace_paths: Option<Vec<String>>,
+    #[serde(rename = "userPrompt")]
+    user_prompt: Option<String>,
+    #[serde(rename = "prompt")]
+    prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,11 +37,14 @@ pub fn run_hook_mode() {
     let _ = io::stdin().read_to_string(&mut stdin_buffer);
 
     let mut workspace_paths: Vec<String> = Vec::new();
+    let mut input_prompt: Option<String> = None;
+
     if !stdin_buffer.trim().is_empty() {
         if let Ok(payload) = serde_json::from_str::<HookPayload>(&stdin_buffer) {
             if let Some(paths) = payload.workspace_paths {
                 workspace_paths = paths;
             }
+            input_prompt = payload.user_prompt.or(payload.prompt);
         }
     }
 
@@ -48,7 +55,8 @@ pub fn run_hook_mode() {
         if let Ok(root_path) = find_project_root(None) {
             let root_str = root_path.to_string_lossy();
             if let Ok(proj) = get_or_create_project(None, Some(&root_str), false) {
-                if seen_project_ids.insert(proj.id.clone()) {
+                if !seen_project_ids.contains(&proj.id) {
+                    seen_project_ids.insert(proj.id.clone());
                     projects.push(proj);
                 }
             }
@@ -58,7 +66,8 @@ pub fn run_hook_mode() {
             if let Ok(root_path) = find_project_root(Some(wp)) {
                 let root_str = root_path.to_string_lossy();
                 if let Ok(proj) = get_or_create_project(None, Some(&root_str), false) {
-                    if seen_project_ids.insert(proj.id.clone()) {
+                    if !seen_project_ids.contains(&proj.id) {
+                        seen_project_ids.insert(proj.id.clone());
                         projects.push(proj);
                     }
                 }
@@ -77,7 +86,16 @@ pub fn run_hook_mode() {
 
     if projects.len() == 1 {
         let proj = &projects[0];
-        let _ = writeln!(ctx_text, "[Memory Context: {} | Project ID: {}]", proj.name, proj.id);
+        let _ = writeln!(
+            ctx_text,
+            "[Memory Context: {} | Project ID: {}]",
+            proj.name, proj.id
+        );
+        let _ = writeln!(
+            ctx_text,
+            "CRITICAL MEMORY DIRECTIVE: To answer questions about stored memories, rules, or saved context, you MUST FIRST execute call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={{\"project_id\": \"{}\"}}). DO NOT scan repository files before calling get_memories, and NEVER substitute repository files as stored memories. The final answer MUST be constructed strictly from the memory records returned by get_memories.",
+            proj.id
+        );
     } else {
         let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
         let ids: Vec<&str> = projects.iter().map(|p| p.id.as_str()).collect();
@@ -86,6 +104,10 @@ pub fn run_hook_mode() {
             "[Memory Context: {} | Active Project IDs: {}]",
             names.join(", "),
             ids.join(", ")
+        );
+        let _ = writeln!(
+            ctx_text,
+            "CRITICAL MEMORY DIRECTIVE: To answer questions about stored memories, rules, or saved context, you MUST FIRST execute call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={{\"project_id\": \"<active_project_id>\"}}). DO NOT scan repository files before calling get_memories, and NEVER substitute repository files as stored memories. The final answer MUST be constructed strictly from the memory records returned by get_memories."
         );
     }
 
@@ -144,9 +166,40 @@ pub fn run_hook_mode() {
         }
     }
 
+    if let Some(ref prompt_str) = input_prompt {
+        let clean_prompt = prompt_str.trim();
+        if clean_prompt.len() >= 3 {
+            let mut matched_mems = Vec::new();
+            for proj in &projects {
+                if let Ok(mems) = search_memories(&proj.id, clean_prompt, 5, Some(&proj.path)) {
+                    matched_mems.extend(mems);
+                }
+            }
+            if let Ok(gmems) = search_memories("global", clean_prompt, 5, None) {
+                matched_mems.extend(gmems);
+            }
+
+            if !matched_mems.is_empty() {
+                let mut added_ids = std::collections::HashSet::new();
+                let mut relevant_text = String::new();
+
+                for m in matched_mems {
+                    if added_ids.insert(m.id.clone()) {
+                        let _ = writeln!(relevant_text, "- [{}] {}", m.id, m.content);
+                    }
+                }
+
+                if !relevant_text.is_empty() {
+                    ctx_text.push_str("\nAuto-Injected Relevant Rules (Prompt Match):\n");
+                    ctx_text.push_str(&relevant_text);
+                    total_memories_found += added_ids.len();
+                }
+            }
+        }
+    }
+
     if total_memories_found == 0 {
-        println!("{}", json!({ "injectSteps": [] }));
-        return;
+        ctx_text.push_str("\n[Database Status: No saved memories currently recorded for this project in DB. Invoke call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={\"project_id\": \"<active_project_id>\"}) to query.]\n");
     }
 
     let resp = HookResponse {

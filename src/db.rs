@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use crate::project::get_auto_detected_project;
 use crate::similarity::is_similar_or_replacement;
+
+static DB_INIT: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectRecord {
@@ -24,16 +27,16 @@ pub struct MemoryRecord {
     pub id: String,
     pub project_id: String,
     pub content: String,
+    pub created_at: String,
     pub tags: Vec<String>,
     pub metadata: Value,
-    pub is_permanent: bool,
-    pub created_at: String,
     pub tokens_estimated: i64,
+    pub is_permanent: bool,
 }
 
 pub fn map_project_row(row: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
-    let raw_linked: String = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[]".to_string());
-    let linked_project_ids: Vec<String> = serde_json::from_str(&raw_linked).unwrap_or_default();
+    let raw_linked = row.get_ref(6)?.as_str().unwrap_or("[]");
+    let linked_project_ids: Vec<String> = serde_json::from_str(raw_linked).unwrap_or_default();
     Ok(ProjectRecord {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -46,19 +49,19 @@ pub fn map_project_row(row: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
 }
 
 pub fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<MemoryRecord> {
-    let tags_str: String = row.get(3)?;
-    let meta_str: String = row.get(4)?;
+    let tags_ref = row.get_ref(3)?.as_str().unwrap_or("[]");
+    let meta_ref = row.get_ref(4)?.as_str().unwrap_or("{}");
     let perm_int: i32 = row.get(5)?;
 
     Ok(MemoryRecord {
         id: row.get(0)?,
         project_id: row.get(1)?,
         content: row.get(2)?,
-        tags: serde_json::from_str(&tags_str).unwrap_or_default(),
-        metadata: serde_json::from_str(&meta_str).unwrap_or(Value::Null),
-        is_permanent: perm_int == 1,
         created_at: row.get(6)?,
+        tags: serde_json::from_str(tags_ref).unwrap_or_default(),
+        metadata: serde_json::from_str(meta_ref).unwrap_or(Value::Null),
         tokens_estimated: row.get(7)?,
+        is_permanent: perm_int == 1,
     })
 }
 
@@ -112,67 +115,72 @@ pub fn get_db_connection() -> Result<Connection> {
         PRAGMA cache_size = -64000;
         PRAGMA temp_store = MEMORY;
         PRAGMA foreign_keys = ON;
-
-        CREATE TABLE IF NOT EXISTS projects (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          path TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          last_active TEXT NOT NULL,
-          memory_count INTEGER DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS memories (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          content TEXT NOT NULL,
-          tags TEXT DEFAULT '[]',
-          metadata TEXT DEFAULT '{}',
-          is_permanent INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL,
-          tokens_estimated INTEGER NOT NULL,
-          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id);
-        CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_memories_proj_perm_created ON memories(project_id, is_permanent DESC, created_at DESC);
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-            id UNINDEXED,
-            project_id UNINDEXED,
-            content,
-            tags
-        );
-
-        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-            INSERT INTO memories_fts(id, project_id, content, tags) VALUES (new.id, new.project_id, new.content, new.tags);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-            DELETE FROM memories_fts WHERE id = old.id;
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-            DELETE FROM memories_fts WHERE id = old.id;
-            INSERT INTO memories_fts(id, project_id, content, tags) VALUES (new.id, new.project_id, new.content, new.tags);
-        END;
         ",
     )?;
 
-    let _ = conn.execute(
-        "ALTER TABLE projects ADD COLUMN linked_project_ids TEXT DEFAULT '[]'",
-        [],
-    );
+    DB_INIT.get_or_init(|| {
+        let _ = conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS projects (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              path TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_active TEXT NOT NULL,
+              memory_count INTEGER DEFAULT 0
+            );
 
-    // Ensure global special project exists
-    let now = Utc::now().to_rfc3339();
-    let _ = conn.execute(
-        "INSERT INTO projects (id, name, path, created_at, last_active, memory_count, linked_project_ids)
-         VALUES ('global', 'Global User Memories', 'GLOBAL', ?1, ?1, 0, '[]')
-         ON CONFLICT(id) DO NOTHING",
-        params![now],
-    );
+            CREATE TABLE IF NOT EXISTS memories (
+              id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL,
+              content TEXT NOT NULL,
+              tags TEXT DEFAULT '[]',
+              metadata TEXT DEFAULT '{}',
+              is_permanent INTEGER DEFAULT 0,
+              created_at TEXT NOT NULL,
+              tokens_estimated INTEGER NOT NULL,
+              FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memories_proj_perm_created ON memories(project_id, is_permanent DESC, created_at DESC);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                id UNINDEXED,
+                project_id UNINDEXED,
+                content,
+                tags
+            );
+
+            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                INSERT INTO memories_fts(id, project_id, content, tags) VALUES (new.id, new.project_id, new.content, new.tags);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+                DELETE FROM memories_fts WHERE id = old.id;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+                DELETE FROM memories_fts WHERE id = old.id;
+                INSERT INTO memories_fts(id, project_id, content, tags) VALUES (new.id, new.project_id, new.content, new.tags);
+            END;
+            ",
+        );
+
+        let _ = conn.execute(
+            "ALTER TABLE projects ADD COLUMN linked_project_ids TEXT DEFAULT '[]'",
+            [],
+        );
+
+        let now = Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "INSERT INTO projects (id, name, path, created_at, last_active, memory_count, linked_project_ids)
+             VALUES ('global', 'Global User Memories', 'GLOBAL', ?1, ?1, 0, '[]')
+             ON CONFLICT(id) DO NOTHING",
+            params![now],
+        );
+    });
 
     Ok(conn)
 }
@@ -423,6 +431,20 @@ pub fn get_memories(
     Ok(result)
 }
 
+fn build_fts5_query(raw: &str) -> String {
+    let terms: Vec<String> = raw
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty() && w.len() > 1)
+        .map(|w| format!("\"{w}\"*"))
+        .collect();
+
+    if terms.is_empty() {
+        format!("\"{}\"*", raw.trim().replace('"', ""))
+    } else {
+        terms.join(" AND ")
+    }
+}
+
 pub fn search_memories(
     project_id: &str,
     query: &str,
@@ -432,7 +454,7 @@ pub fn search_memories(
     let target_id = resolve_target_project_id(project_id, path, false)?;
 
     let conn = get_db_connection()?;
-    let fts_query = format!("\"{}\"*", query.trim().replace('"', ""));
+    let fts_query = build_fts5_query(query);
 
     let fts_result = conn.prepare(
         "SELECT m.id, m.project_id, m.content, m.tags, m.metadata, m.is_permanent, m.created_at, m.tokens_estimated
@@ -636,24 +658,47 @@ pub fn move_memories(
 pub fn get_memory_by_id(memory_id: &str) -> Result<Option<MemoryRecord>> {
     let conn = get_db_connection()?;
     let mut stmt = conn.prepare("SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated FROM memories WHERE id = ?1")?;
-    let res = stmt
-        .query_row(params![memory_id], |row| {
-            let tags_str: String = row.get(3)?;
-            let meta_str: String = row.get(4)?;
-            let perm: i32 = row.get(5)?;
-            Ok(MemoryRecord {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                content: row.get(2)?,
-                tags: serde_json::from_str(&tags_str).unwrap_or_default(),
-                metadata: serde_json::from_str(&meta_str).unwrap_or(Value::Null),
-                is_permanent: perm == 1,
-                created_at: row.get(6)?,
-                tokens_estimated: row.get(7)?,
-            })
-        })
-        .ok();
+    let res = stmt.query_row(params![memory_id], map_memory_row).ok();
     Ok(res)
+}
+
+pub fn update_memory(
+    id: &str,
+    content: Option<&str>,
+    tags: Option<Vec<String>>,
+    metadata: Option<Value>,
+    is_permanent: Option<bool>,
+) -> Result<Option<MemoryRecord>> {
+    let conn = get_db_connection()?;
+
+    let current = match get_memory_by_id(id)? {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    let new_content = content.unwrap_or(&current.content);
+    let new_tags = tags.unwrap_or(current.tags);
+    let new_metadata = metadata.unwrap_or(current.metadata);
+    let new_is_permanent = is_permanent.unwrap_or(current.is_permanent);
+
+    let tags_json = serde_json::to_string(&new_tags).unwrap_or_else(|_| "[]".to_string());
+    let meta_json = serde_json::to_string(&new_metadata).unwrap_or_else(|_| "{}".to_string());
+    let perm_int = if new_is_permanent { 1 } else { 0 };
+    let tokens_estimated = (new_content.len() / 4) as i64;
+
+    conn.execute(
+        "UPDATE memories SET content = ?1, tags = ?2, metadata = ?3, is_permanent = ?4, tokens_estimated = ?5 WHERE id = ?6",
+        params![
+            new_content,
+            tags_json,
+            meta_json,
+            perm_int,
+            tokens_estimated,
+            id
+        ],
+    )?;
+
+    get_memory_by_id(id)
 }
 
 pub fn get_memory_stats() -> Result<MemoryStats> {
@@ -797,22 +842,7 @@ pub fn export_memories_to_json(file_path: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| {
-            let tags_str: String = row.get(3)?;
-            let meta_str: String = row.get(4)?;
-            let perm_int: i32 = row.get(5)?;
-
-            Ok(MemoryRecord {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                content: row.get(2)?,
-                tags: serde_json::from_str(&tags_str).unwrap_or_default(),
-                metadata: serde_json::from_str(&meta_str).unwrap_or(Value::Null),
-                is_permanent: perm_int == 1,
-                created_at: row.get(6)?,
-                tokens_estimated: row.get(7)?,
-            })
-        })
+        .query_map([], map_memory_row)
         .map_err(|e| e.to_string())?;
 
     let mut memories = Vec::new();

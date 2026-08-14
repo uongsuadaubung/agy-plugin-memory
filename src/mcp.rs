@@ -195,17 +195,25 @@ impl ToolBuilder {
 
 pub fn run_mcp_mode() {
     let stdin = io::stdin();
-    let mut lines = stdin.lock().lines();
+    let mut handle = stdin.lock();
+    let mut line_buf = String::with_capacity(4096);
 
-    while let Some(Ok(line)) = lines.next() {
-        if line.trim().is_empty() {
+    while handle.read_line(&mut line_buf).unwrap_or(0) > 0 {
+        let trimmed = line_buf.trim();
+        if trimmed.is_empty() {
+            line_buf.clear();
             continue;
         }
 
-        let req: JsonRpcRequest = match serde_json::from_str(&line) {
+        let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => {
+                line_buf.clear();
+                continue;
+            }
         };
+
+        line_buf.clear();
 
         if req.method.starts_with("notifications/") {
             continue;
@@ -309,6 +317,15 @@ pub fn run_mcp_mode() {
                     ToolBuilder::new("get_memory_by_id")
                         .description("Retrieve a single memory record by its unique memory ID.")
                         .add_string_param("memory_id", "Memory ID to inspect")
+                        .required_params(&["memory_id"])
+                        .build(),
+
+                    ToolBuilder::new("update_memory")
+                        .description("Directly update an existing memory record's content, tags, metadata, or permanence by memory ID.")
+                        .add_string_param("memory_id", "Unique memory ID to update")
+                        .add_string_param("content", "Optional new memory content text")
+                        .add_array_param("tags", "string", "Optional new tags array")
+                        .add_bool_param("is_permanent", "Optional new permanence state")
                         .required_params(&["memory_id"])
                         .build(),
 
@@ -430,10 +447,10 @@ pub fn run_mcp_mode() {
                     }
 
                     "get_memories" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
-                        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-                        let path = args.get("path").and_then(|v| v.as_str());
-                        let is_perm = args.get("is_permanent").and_then(|v| v.as_bool());
+                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
+                        let limit = usize::try_from(args.get("limit").and_then(Value::as_u64).unwrap_or(100)).unwrap_or(100);
+                        let path = args.get("path").and_then(Value::as_str);
+                        let is_perm = args.get("is_permanent").and_then(Value::as_bool);
 
                         let tags: Option<Vec<String>> = args
                             .get("tags")
@@ -446,10 +463,10 @@ pub fn run_mcp_mode() {
                     }
 
                     "search_memories" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
-                        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-                        let path = args.get("path").and_then(|v| v.as_str());
+                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
+                        let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+                        let limit = usize::try_from(args.get("limit").and_then(Value::as_u64).unwrap_or(100)).unwrap_or(100);
+                        let path = args.get("path").and_then(Value::as_str);
 
                         match search_memories(project_id, query, limit, path) {
                             Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
@@ -458,10 +475,26 @@ pub fn run_mcp_mode() {
                     }
 
                     "get_memory_by_id" => {
-                        let memory_id = args.get("memory_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let memory_id = args.get("memory_id").and_then(Value::as_str).unwrap_or("");
                         match get_memory_by_id(memory_id) {
                             Ok(Some(m)) => mcp_ok_val(&format_memory_for_agent(&m)),
                             Ok(None) => mcp_err_str("Memory ID not found"),
+                            Err(e) => mcp_err_str(e),
+                        }
+                    }
+
+                    "update_memory" => {
+                        let memory_id = args.get("memory_id").and_then(Value::as_str).unwrap_or("");
+                        let content = args.get("content").and_then(Value::as_str);
+                        let tags: Option<Vec<String>> = args
+                            .get("tags")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok());
+                        let metadata: Option<Value> = args.get("metadata").cloned();
+                        let is_perm = args.get("is_permanent").and_then(Value::as_bool);
+
+                        match update_memory(memory_id, content, tags, metadata, is_perm) {
+                            Ok(Some(m)) => mcp_ok_val(&format_memory_for_agent(&m)),
+                            Ok(None) => mcp_err_str(format!("Memory ID '{memory_id}' not found")),
                             Err(e) => mcp_err_str(e),
                         }
                     }
@@ -483,7 +516,7 @@ pub fn run_mcp_mode() {
                             .get("memory_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
-                        let is_perm = args.get("is_permanent").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let is_perm = args.get("is_permanent").and_then(Value::as_bool).unwrap_or(false);
 
                         match batch_toggle_permanence(memory_ids, is_perm) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "updatedCount": count, "is_permanent": is_perm })),
@@ -497,9 +530,9 @@ pub fn run_mcp_mode() {
                     },
 
                     "cleanup_expired" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
-                        let max_mems = args.get("max_memories").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-                        let expire_days = args.get("expire_days").and_then(|v| v.as_i64()).unwrap_or(30);
+                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
+                        let max_mems = usize::try_from(args.get("max_memories").and_then(Value::as_u64).unwrap_or(50)).unwrap_or(50);
+                        let expire_days = args.get("expire_days").and_then(Value::as_i64).unwrap_or(30);
 
                         match cleanup_expired(project_id, max_mems, expire_days, None) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
@@ -508,11 +541,11 @@ pub fn run_mcp_mode() {
                     }
 
                     "link_projects" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
                         let target_project_ids: Vec<String> = args.get("target_project_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
-                        let path = args.get("path").and_then(|v| v.as_str());
+                        let path = args.get("path").and_then(Value::as_str);
 
                         match link_projects(project_id, target_project_ids, path) {
                             Ok(p) => mcp_ok_val(&json!({ "id": p.id, "linked_project_ids": p.linked_project_ids })),
@@ -521,7 +554,7 @@ pub fn run_mcp_mode() {
                     }
 
                     "get_project_links" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
                         let linked = get_linked_project_ids(project_id);
                         mcp_ok_val(&json!({ "project_id": project_id, "linked_project_ids": linked }))
                     }
@@ -530,7 +563,7 @@ pub fn run_mcp_mode() {
                         let memory_ids: Vec<String> = args.get("memory_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
-                        let target_project_id = args.get("target_project_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let target_project_id = args.get("target_project_id").and_then(Value::as_str).unwrap_or("");
 
                         match move_memories(memory_ids, target_project_id) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "movedCount": count, "target_project_id": target_project_id })),
@@ -538,7 +571,7 @@ pub fn run_mcp_mode() {
                         }
                     }
 
-                    _ => mcp_err_str(format!("Unknown tool: {}", tool_name)),
+                    _ => mcp_err_str(format!("Unknown tool: {tool_name}")),
                 };
 
                 let resp = JsonRpcResponse {

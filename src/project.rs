@@ -42,7 +42,7 @@ pub fn hash_project_path(path: &Path) -> String {
     let mut hasher = Md5::new();
     hasher.update(norm.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)[..12].to_string()
+    format!("{result:x}")[..12].to_string()
 }
 
 pub fn find_project_root(starting_path: Option<&str>) -> Result<PathBuf, String> {
@@ -57,9 +57,9 @@ pub fn find_project_root(starting_path: Option<&str>) -> Result<PathBuf, String>
     let canonical = start.canonicalize().unwrap_or(start);
 
     if is_ide_app_dir(&canonical) {
+        let display = canonical.display();
         return Err(format!(
-            "Path '{}' is an IDE application installation directory, not a user project workspace.",
-            canonical.to_string_lossy()
+            "Path '{display}' is an IDE application installation directory, not a user project workspace."
         ));
     }
 

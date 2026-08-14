@@ -29,34 +29,34 @@ fn print_cli_help() {
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("[FATAL PANIC in apm-mcp] {}", info);
+        eprintln!("[FATAL PANIC in apm-mcp] {info}");
     }));
 
     let args: Vec<String> = env::args().collect();
-    let mode = args.get(1).map(|s| s.as_str());
+    let mode = args.get(1).map(String::as_str);
 
     match mode {
-        Some("install") | Some("--install") => {
+        Some("install" | "--install") => {
             install::run_install_mode();
         }
-        Some("uninstall") | Some("--uninstall") => {
+        Some("uninstall" | "--uninstall") => {
             uninstall::run_uninstall_mode();
         }
-        Some("export") | Some("--export") => {
-            let path = args.get(2).map(|s| s.as_str());
+        Some("export" | "--export") => {
+            let path = args.get(2).map(String::as_str);
             export_import::run_export_mode(path);
         }
-        Some("import") | Some("--import") => {
-            let path = args.get(2).map(|s| s.as_str());
+        Some("import" | "--import") => {
+            let path = args.get(2).map(String::as_str);
             export_import::run_import_mode(path);
         }
-        Some("hook") | Some("--hook") => {
+        Some("hook" | "--hook") => {
             hook::run_hook_mode();
         }
-        Some("help") | Some("--help") | Some("-h") => {
+        Some("help" | "--help" | "-h") => {
             print_cli_help();
         }
-        Some("mcp") | Some("--mcp") | Some("stdio") | Some("--stdio") | Some("-m") => {
+        Some("mcp" | "--mcp" | "stdio" | "--stdio" | "-m") => {
             mcp::run_mcp_mode();
         }
         None => {
@@ -67,12 +67,12 @@ fn main() {
             }
         }
         Some(other) => {
-            if !io::stdin().is_terminal() {
-                eprintln!("[ERROR] Unrecognized MCP command argument '{}', falling back to MCP mode.", other);
-                mcp::run_mcp_mode();
-            } else {
-                println!("[ERROR] Unknown command: {}\n", other);
+            if io::stdin().is_terminal() {
+                println!("[ERROR] Unknown command: {other}\n");
                 print_cli_help();
+            } else {
+                eprintln!("[ERROR] Unrecognized MCP command argument '{other}', falling back to MCP mode.");
+                mcp::run_mcp_mode();
             }
         }
     }
