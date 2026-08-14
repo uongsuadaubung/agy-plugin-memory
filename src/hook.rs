@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fmt::Write;
-use std::io::{self, Read, Write};
+use std::fmt::Write as FmtWrite;
+use std::io::{self, Read, Write as IoWrite};
 
 use crate::db::{get_memories, get_or_create_project};
 use crate::project::find_project_root;
