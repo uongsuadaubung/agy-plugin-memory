@@ -37,37 +37,37 @@ An ultra-high-performance, standalone Model Context Protocol (MCP) server & Life
 ## 🛠️ Complete MCP Toolsuite for Agent (14 Unified Tools)
 
 ### 1. Project Management & Linking
-- **`get_or_create_project`**: Auto-detects workspace root via `.git`, `Cargo.toml`, `package.json`, etc., and hashes path to a 12-char deterministic ID.
+- **`get_project`**: Auto-detects workspace root via `.git`, `Cargo.toml`, `package.json`, etc., and hashes path to a 12-char deterministic ID.
   - *Args*: `name` (optional string), `path` (optional string)
 - **`list_projects`**: Returns all registered projects with ID, name, memory count, and linked project IDs.
   - *Args*: None
 - **`link_projects`**: Link current project to 1 or more target projects to inherit their permanent rules.
   - *Args*: `project_id` (string), `target_project_ids` (array of strings), `path` (optional string)
-- **`get_project_links`**: Get list of linked project IDs for a project.
+- **`project_links`**: Get list of linked project IDs for a project.
   - *Args*: `project_id` (string)
-- **`clear_project_memories`**: Deletes ALL memories for a project while keeping the project record (protected against `global`).
+- **`clear_memories`**: Deletes ALL memories for a project while keeping the project record (protected against `global`).
   - *Args*: `project_id` (string), `path` (optional string)
-- **`batch_delete_projects`**: Deletes 1 or multiple projects and all their stored memories (protected against `global`).
+- **`delete_projects`**: Deletes 1 or multiple projects and all their stored memories (protected against `global`).
   - *Args*: `project_ids` (array of strings)
 
-### 2. Memory Operations (Unified Batch-First & Smart Upsert)
-- **`batch_add_memories`**: Add or smart-upsert 1 or multiple memory entries with Token Jaccard Similarity deduplication.
+### 2. Memory Operations (Smart Upsert & Retrieval)
+- **`add_memories`**: Add or smart-upsert 1 or multiple memory entries with Token Jaccard Similarity deduplication.
   - *Args*: `project_id` (string), `items` (array of `{ content, is_permanent, tags, metadata }`)
 - **`get_memories`**: Retrieve active stored memories ordered by permanence and recency.
   - *Args*: `project_id` (string), `limit` (number, default 100), `tags` (optional array), `is_permanent` (optional bool)
 - **`search_memories`**: FTS5 Full-Text BM25 relevance search across memory content and tags.
   - *Args*: `project_id` (string), `query` (string), `limit` (number)
-- **`get_memory_by_id`**: Inspect a single memory record by its memory ID.
+- **`get_memory`**: Inspect a single memory record by its memory ID.
   - *Args*: `memory_id` (string)
-- **`batch_delete_memories`**: Delete 1 or multiple memories by ID array.
+- **`delete_memories`**: Delete 1 or multiple memories by ID array.
   - *Args*: `memory_ids` (array of strings)
-- **`batch_toggle_permanence`**: Update permanence flag for 1 or multiple memories by ID array.
+- **`toggle_permanence`**: Update permanence flag for 1 or multiple memories by ID array.
   - *Args*: `memory_ids` (array of strings), `is_permanent` (bool)
 
 ### 3. Analytics & Maintenance
-- **`get_memory_stats`**: Get memory database usage analytics (total projects, total memories, permanent vs short-term, database byte size).
+- **`memory_stats`**: Get memory database usage analytics (total projects, total memories, permanent vs short-term, database byte size).
   - *Args*: None
-- **`cleanup_expired`**: Retention cleanup for short-term memories older than 30 days or exceeding 50 entries limit.
+- **`cleanup`**: Retention cleanup for short-term memories older than 30 days or exceeding 50 entries limit.
   - *Args*: `project_id` (string), `max_memories` (default 50), `expire_days` (default 30)
 
 ---

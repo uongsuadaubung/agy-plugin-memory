@@ -185,7 +185,7 @@ pub fn get_db_connection() -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn get_or_create_project(
+pub fn get_project(
     name: Option<&str>,
     path: Option<&str>,
     create_if_absent: bool,
@@ -280,11 +280,11 @@ pub fn resolve_target_project_id(
         }
     }
 
-    let proj = get_or_create_project(None, path, create_if_absent)?;
+    let proj = get_project(None, path, create_if_absent)?;
     Ok(proj.id)
 }
 
-pub fn batch_add_memories(
+pub fn add_memories(
     project_id: &str,
     items: Vec<BatchMemoryItem>,
     path: Option<&str>,
@@ -385,7 +385,7 @@ pub fn batch_add_memories(
 
     tx.commit()?;
 
-    let _ = cleanup_expired(&target_id, 50, 30, path);
+    let _ = cleanup(&target_id, 50, 30, path);
 
     Ok(results)
 }
@@ -497,7 +497,7 @@ pub fn search_memories(
     Ok(result)
 }
 
-pub fn batch_delete_memories(memory_ids: Vec<String>) -> Result<usize> {
+pub fn delete_memories(memory_ids: Vec<String>) -> Result<usize> {
     if memory_ids.is_empty() {
         return Ok(0);
     }
@@ -514,7 +514,7 @@ pub fn batch_delete_memories(memory_ids: Vec<String>) -> Result<usize> {
     Ok(count)
 }
 
-pub fn batch_delete_projects(project_ids: Vec<String>) -> Result<usize> {
+pub fn delete_projects(project_ids: Vec<String>) -> Result<usize> {
     let safe_ids: Vec<String> = project_ids.into_iter().filter(|id| id != "global").collect();
     if safe_ids.is_empty() {
         return Ok(0);
@@ -537,7 +537,7 @@ pub fn batch_delete_projects(project_ids: Vec<String>) -> Result<usize> {
     Ok(count)
 }
 
-pub fn batch_toggle_permanence(memory_ids: Vec<String>, is_permanent: bool) -> Result<usize> {
+pub fn toggle_permanence(memory_ids: Vec<String>, is_permanent: bool) -> Result<usize> {
     if memory_ids.is_empty() {
         return Ok(0);
     }
@@ -655,7 +655,7 @@ pub fn move_memories(
     Ok(moved_count)
 }
 
-pub fn get_memory_by_id(memory_id: &str) -> Result<Option<MemoryRecord>> {
+pub fn get_memory(memory_id: &str) -> Result<Option<MemoryRecord>> {
     let conn = get_db_connection()?;
     let mut stmt = conn.prepare("SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated FROM memories WHERE id = ?1")?;
     let res = stmt.query_row(params![memory_id], map_memory_row).ok();
@@ -671,7 +671,7 @@ pub fn update_memory(
 ) -> Result<Option<MemoryRecord>> {
     let conn = get_db_connection()?;
 
-    let current = match get_memory_by_id(id)? {
+    let current = match get_memory(id)? {
         Some(m) => m,
         None => return Ok(None),
     };
@@ -698,10 +698,10 @@ pub fn update_memory(
         ],
     )?;
 
-    get_memory_by_id(id)
+    get_memory(id)
 }
 
-pub fn get_memory_stats() -> Result<MemoryStats> {
+pub fn memory_stats() -> Result<MemoryStats> {
     let conn = get_db_connection()?;
     let total_projects: i64 = conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0)).unwrap_or(0);
     let total_memories: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0)).unwrap_or(0);
@@ -720,7 +720,7 @@ pub fn get_memory_stats() -> Result<MemoryStats> {
     })
 }
 
-pub fn clear_project_memories(project_id: &str, path: Option<&str>) -> Result<usize> {
+pub fn clear_memories(project_id: &str, path: Option<&str>) -> Result<usize> {
     let target_id = resolve_target_project_id(project_id, path, false)?;
 
     if target_id == "global" {
@@ -754,7 +754,7 @@ pub fn link_projects(
         params![json_targets, target_id],
     )?;
 
-    get_or_create_project(None, path, false)
+    get_project(None, path, false)
 }
 
 pub fn get_linked_project_ids(project_id: &str) -> Vec<String> {
@@ -786,7 +786,7 @@ pub fn list_projects() -> Result<Vec<ProjectRecord>> {
     Ok(list)
 }
 
-pub fn cleanup_expired(
+pub fn cleanup(
     project_id: &str,
     max_memories: usize,
     expire_days: i64,

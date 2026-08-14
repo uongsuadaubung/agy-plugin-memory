@@ -6,9 +6,9 @@ description: Initialize project memory and display current session context
 
 Initialize project memory and display current session context:
 
-1. Call `get_or_create_project()` to detect or register current project.
+1. Call `get_project()` to detect or register current project.
 2. Call `get_memories(project_id, limit=30)` to retrieve permanent rules & recent session memories.
-3. Inspect top-level workspace layout and save/update Architecture Tree memory via `batch_add_memories(items=[{content: "...", is_permanent: true, tags: ["architecture"]}])`.
+3. Inspect top-level workspace layout and save/update Architecture Tree memory via `add_memories(items=[{content: "...", is_permanent: true, tags: ["architecture"]}])`.
 4. Report status to user:
    - **Project Name & ID**
    - **Permanent Rules Count**

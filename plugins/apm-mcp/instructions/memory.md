@@ -15,13 +15,13 @@
 
 ## Linking & Conflict Refactoring
 - **Project Linking**: Use `link_projects(project_id="...", target_project_ids=[...])` to inherit permanent rules across ecosystem projects.
-- **Smart Upsert & Intent Refactoring**: `batch_add_memories` auto-overwrites similar entries (Jaccard $\ge 60\%$). When user replaces X with Y, search X $\rightarrow$ delete X $\rightarrow$ add Y.
+- **Smart Upsert & Intent Refactoring**: `add_memories` auto-overwrites similar entries (Jaccard $\ge 60\%$). When user replaces X with Y, search X $\rightarrow$ delete X $\rightarrow$ add Y.
 
-## Unified Batch API Quick Reference
-- `get_or_create_project(name, path)` | `list_projects()` | `batch_delete_projects(project_ids)`
-- `link_projects(project_id, target_project_ids)` | `get_project_links(project_id)`
-- `batch_add_memories(project_id, items=[{content, is_permanent, tags}])`
-- `get_memories(project_id, limit, is_permanent)` | `search_memories(project_id, query)` | `get_memory_by_id(memory_id)`
-- `move_memories(memory_ids, target_project_id)` | `batch_delete_memories(memory_ids)` | `batch_toggle_permanence(memory_ids, is_permanent)`
-- `clear_project_memories(project_id)` | `cleanup_expired(project_id, max_memories, expire_days)` | `get_memory_stats()`
+## API Quick Reference
+- `get_project(name, path)` | `list_projects()` | `delete_projects(project_ids)`
+- `link_projects(project_id, target_project_ids)` | `project_links(project_id)`
+- `add_memories(project_id, items=[{content, is_permanent, tags}])`
+- `get_memories(project_id, limit, is_permanent)` | `search_memories(project_id, query)` | `get_memory(memory_id)`
+- `move_memories(memory_ids, target_project_id)` | `delete_memories(memory_ids)` | `toggle_permanence(memory_ids, is_permanent)`
+- `clear_memories(project_id)` | `cleanup(project_id, max_memories, expire_days)` | `memory_stats()`
 

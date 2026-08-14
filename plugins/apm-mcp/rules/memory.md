@@ -23,16 +23,16 @@ Before saving to `global`, verify **Context Dependency**: if a rule references p
 3. **Project Ephemeral (`project_id="<active_project_id>"`, `is_permanent=false`)**: Sprint goals, progress logs, & temporary bugfix insights.
 
 ## Smart Upsert & Reflection
-- **Conflict Resolution**: Search before adding; delete/replace obsolete entries via `batch_delete_memories` when contradicted.
+- **Conflict Resolution**: Search before adding; delete/replace obsolete entries via `delete_memories` when contradicted.
 - **Silent Badge**: On auto-saving memories, append note: `[Auto-Memory Saved: <summary>]`.
 
 ## Action Triggers (Semantic Intent)
-- **Save / Upsert**: Save rule or milestone $\rightarrow$ `batch_add_memories(project_id="<active_project_id>", ...)`
-- **Global Save**: Save universal rule $\rightarrow$ `batch_add_memories(project_id="global", is_permanent=true, ...)`
+- **Save / Upsert**: Save rule or milestone $\rightarrow$ `add_memories(project_id="<active_project_id>", ...)`
+- **Global Save**: Save universal rule $\rightarrow$ `add_memories(project_id="global", is_permanent=true, ...)`
 - **Update / Direct Edit**: Edit existing rule directly by ID $\rightarrow$ `update_memory(memory_id="<id>", content="...", ...)`
-- **Replace / Conflict**: Deprecate X for Y $\rightarrow$ use `update_memory` or `search_memories` $\rightarrow$ `batch_delete_memories` $\rightarrow$ `batch_add_memories`
+- **Replace / Conflict**: Deprecate X for Y $\rightarrow$ use `update_memory` or `search_memories` $\rightarrow$ `delete_memories` $\rightarrow$ `add_memories`
 - **Move / Link**: Transfer memories $\rightarrow$ `move_memories`; Link projects $\rightarrow$ `link_projects`
-- **Delete / Reset**: Delete memory $\rightarrow$ `batch_delete_memories`; Wipe project memories $\rightarrow$ `clear_project_memories`; Delete project $\rightarrow$ `batch_delete_projects`
+- **Delete / Reset**: Delete memory $\rightarrow$ `delete_memories`; Wipe project memories $\rightarrow$ `clear_memories`; Delete project $\rightarrow$ `delete_projects`
 
 
 

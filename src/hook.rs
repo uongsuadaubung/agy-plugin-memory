@@ -3,7 +3,7 @@ use serde_json::json;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Read, Write as IoWrite};
 
-use crate::db::{get_memories, get_or_create_project, search_memories};
+use crate::db::{get_memories, get_project, search_memories};
 use crate::project::find_project_root;
 
 pub const MAX_GLOBAL_MEMORIES: usize = 1000;
@@ -54,7 +54,7 @@ pub fn run_hook_mode() {
     if workspace_paths.is_empty() {
         if let Ok(root_path) = find_project_root(None) {
             let root_str = root_path.to_string_lossy();
-            if let Ok(proj) = get_or_create_project(None, Some(&root_str), false) {
+            if let Ok(proj) = get_project(None, Some(&root_str), false) {
                 if !seen_project_ids.contains(&proj.id) {
                     seen_project_ids.insert(proj.id.clone());
                     projects.push(proj);
@@ -65,7 +65,7 @@ pub fn run_hook_mode() {
         for wp in &workspace_paths {
             if let Ok(root_path) = find_project_root(Some(wp)) {
                 let root_str = root_path.to_string_lossy();
-                if let Ok(proj) = get_or_create_project(None, Some(&root_str), false) {
+                if let Ok(proj) = get_project(None, Some(&root_str), false) {
                     if !seen_project_ids.contains(&proj.id) {
                         seen_project_ids.insert(proj.id.clone());
                         projects.push(proj);

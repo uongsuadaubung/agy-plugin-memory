@@ -253,7 +253,7 @@ pub fn run_mcp_mode() {
 
             "tools/list" => {
                 let tools_list = vec![
-                    ToolBuilder::new("get_or_create_project")
+                    ToolBuilder::new("get_project")
                         .description("Get an existing project by name/path or create a new one.")
                         .add_string_param("name", "Project name")
                         .add_string_param("path", "Project directory path")
@@ -264,20 +264,20 @@ pub fn run_mcp_mode() {
                         .description("List all registered projects in the memory database.")
                         .build(),
 
-                    ToolBuilder::new("clear_project_memories")
+                    ToolBuilder::new("clear_memories")
                         .description("Delete ALL memories (both permanent and short-term) for a project.")
                         .add_string_param("project_id", "Unique Project ID")
                         .add_string_param("path", "Optional project directory path")
                         .required_params(&["project_id"])
                         .build(),
 
-                    ToolBuilder::new("batch_delete_projects")
-                        .description("Batch delete 1 or multiple projects by an array of project IDs.")
+                    ToolBuilder::new("delete_projects")
+                        .description("Delete 1 or multiple projects by an array of project IDs.")
                         .add_array_param("project_ids", "string", "List of project IDs to delete")
                         .required_params(&["project_ids"])
                         .build(),
 
-                    ToolBuilder::new("batch_add_memories")
+                    ToolBuilder::new("add_memories")
                         .description("Add or smart-upsert 1 or multiple memory entries at once.")
                         .add_string_param("project_id", "Unique Project ID")
                         .add_string_param("path", "Optional project path")
@@ -314,7 +314,7 @@ pub fn run_mcp_mode() {
                         .required_params(&["project_id", "query"])
                         .build(),
 
-                    ToolBuilder::new("get_memory_by_id")
+                    ToolBuilder::new("get_memory")
                         .description("Retrieve a single memory record by its unique memory ID.")
                         .add_string_param("memory_id", "Memory ID to inspect")
                         .required_params(&["memory_id"])
@@ -329,24 +329,24 @@ pub fn run_mcp_mode() {
                         .required_params(&["memory_id"])
                         .build(),
 
-                    ToolBuilder::new("batch_delete_memories")
-                        .description("Batch delete 1 or multiple memories by an array of memory IDs.")
+                    ToolBuilder::new("delete_memories")
+                        .description("Delete 1 or multiple memories by an array of memory IDs.")
                         .add_array_param("memory_ids", "string", "List of memory IDs to delete")
                         .required_params(&["memory_ids"])
                         .build(),
 
-                    ToolBuilder::new("batch_toggle_permanence")
-                        .description("Batch update permanence flag for 1 or multiple memories by ID array.")
+                    ToolBuilder::new("toggle_permanence")
+                        .description("Update permanence flag for 1 or multiple memories by ID array.")
                         .add_array_param("memory_ids", "string", "List of memory IDs")
                         .add_bool_param("is_permanent", "New permanence state")
                         .required_params(&["memory_ids", "is_permanent"])
                         .build(),
 
-                    ToolBuilder::new("get_memory_stats")
+                    ToolBuilder::new("memory_stats")
                         .description("Get memory database usage statistics (projects, memories, db size).")
                         .build(),
 
-                    ToolBuilder::new("cleanup_expired")
+                    ToolBuilder::new("cleanup")
                         .description("Retention cleanup for short-term memories older than 30 days.")
                         .add_string_param("project_id", "Unique Project ID")
                         .add_number_param("max_memories", 50, "Maximum short-term memories to retain")
@@ -362,7 +362,7 @@ pub fn run_mcp_mode() {
                         .required_params(&["project_id", "target_project_ids"])
                         .build(),
 
-                    ToolBuilder::new("get_project_links")
+                    ToolBuilder::new("project_links")
                         .description("Get linked project IDs for a project.")
                         .add_string_param("project_id", "Project ID")
                         .required_params(&["project_id"])
@@ -391,10 +391,10 @@ pub fn run_mcp_mode() {
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
                 let tool_result = match tool_name {
-                    "get_or_create_project" => {
+                    "get_project" => {
                         let name = args.get("name").and_then(|v| v.as_str());
                         let path = args.get("path").and_then(|v| v.as_str());
-                        match get_or_create_project(name, path, true) {
+                        match get_project(name, path, true) {
                             Ok(p) => mcp_ok_val(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count, "linked_project_ids": p.linked_project_ids })),
                             Err(e) => mcp_err_str(e),
                         }
@@ -411,28 +411,28 @@ pub fn run_mcp_mode() {
                         Err(e) => mcp_err_str(e),
                     },
 
-                    "clear_project_memories" => {
+                    "clear_memories" => {
                         let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
                         let path = args.get("path").and_then(|v| v.as_str());
-                        match clear_project_memories(project_id, path) {
+                        match clear_memories(project_id, path) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
-                    "batch_delete_projects" => {
+                    "delete_projects" => {
                         let project_ids: Vec<String> = args
                             .get("project_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
 
-                        match batch_delete_projects(project_ids) {
+                        match delete_projects(project_ids) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
-                    "batch_add_memories" => {
+                    "add_memories" => {
                         let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
                         let path = args.get("path").and_then(|v| v.as_str());
                         let items: Vec<BatchMemoryItem> = args
@@ -440,7 +440,7 @@ pub fn run_mcp_mode() {
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
 
-                        match batch_add_memories(project_id, items, path) {
+                        match add_memories(project_id, items, path) {
                             Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
                             Err(e) => mcp_err_str(e),
                         }
@@ -474,9 +474,9 @@ pub fn run_mcp_mode() {
                         }
                     }
 
-                    "get_memory_by_id" => {
+                    "get_memory" => {
                         let memory_id = args.get("memory_id").and_then(Value::as_str).unwrap_or("");
-                        match get_memory_by_id(memory_id) {
+                        match get_memory(memory_id) {
                             Ok(Some(m)) => mcp_ok_val(&format_memory_for_agent(&m)),
                             Ok(None) => mcp_err_str("Memory ID not found"),
                             Err(e) => mcp_err_str(e),
@@ -499,42 +499,42 @@ pub fn run_mcp_mode() {
                         }
                     }
 
-                    "batch_delete_memories" => {
+                    "delete_memories" => {
                         let memory_ids: Vec<String> = args
                             .get("memory_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
 
-                        match batch_delete_memories(memory_ids) {
+                        match delete_memories(memory_ids) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
-                    "batch_toggle_permanence" => {
+                    "toggle_permanence" => {
                         let memory_ids: Vec<String> = args
                             .get("memory_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
                         let is_perm = args.get("is_permanent").and_then(Value::as_bool).unwrap_or(false);
 
-                        match batch_toggle_permanence(memory_ids, is_perm) {
+                        match toggle_permanence(memory_ids, is_perm) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "updatedCount": count, "is_permanent": is_perm })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
-                    "get_memory_stats" => match get_memory_stats() {
+                    "memory_stats" => match memory_stats() {
                         Ok(stats) => mcp_ok_val(&json!(stats)),
                         Err(e) => mcp_err_str(e),
                     },
 
-                    "cleanup_expired" => {
+                    "cleanup" => {
                         let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
                         let max_mems = usize::try_from(args.get("max_memories").and_then(Value::as_u64).unwrap_or(50)).unwrap_or(50);
                         let expire_days = args.get("expire_days").and_then(Value::as_i64).unwrap_or(30);
 
-                        match cleanup_expired(project_id, max_mems, expire_days, None) {
+                        match cleanup(project_id, max_mems, expire_days, None) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
@@ -553,7 +553,7 @@ pub fn run_mcp_mode() {
                         }
                     }
 
-                    "get_project_links" => {
+                    "project_links" => {
                         let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
                         let linked = get_linked_project_ids(project_id);
                         mcp_ok_val(&json!({ "project_id": project_id, "linked_project_ids": linked }))

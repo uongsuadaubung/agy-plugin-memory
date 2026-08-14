@@ -37,37 +37,37 @@ Hệ thống **Memory Model Context Protocol (MCP) Server & Lifecycle Hook Plugi
 ## 🛠️ Danh mục 14 MCP Tool dành cho AI
 
 ### 1. Quản lý & Liên kết Dự án
-- **`get_or_create_project`**: Tự động nhận diện gốc dự án qua `.git`, `Cargo.toml`, `package.json`... và hash đường dẫn thành ID 12 ký tự duy nhất.
+- **`get_project`**: Tự động nhận diện gốc dự án qua `.git`, `Cargo.toml`, `package.json`... và hash đường dẫn thành ID 12 ký tự duy nhất.
   - *Tham số*: `name` (tùy chọn), `path` (tùy chọn)
 - **`list_projects`**: Liệt kê tất cả các dự án đã đăng ký trong database cùng ID, tên, số lượng memory và danh sách dự án liên kết.
   - *Tham số*: Không có
 - **`link_projects`**: Liên kết dự án hiện tại với 1 hoặc nhiều dự án khác để tự động kế thừa quy tắc vĩnh viễn.
   - *Tham số*: `project_id` (bắt buộc), `target_project_ids` (mảng mảng ID dự án), `path` (tùy chọn)
-- **`get_project_links`**: Lấy danh sách ID các dự án đang liên kết với dự án này.
+- **`project_links`**: Lấy danh sách ID các dự án đang liên kết với dự án này.
   - *Tham số*: `project_id` (bắt buộc)
-- **`clear_project_memories`**: Xóa TẤT CẢ trí nhớ của một dự án nhưng giữ lại bản ghi dự án (bảo vệ chống xóa `global`).
+- **`clear_memories`**: Xóa TẤT CẢ trí nhớ của một dự án nhưng giữ lại bản ghi dự án (bảo vệ chống xóa `global`).
   - *Tham số*: `project_id` (bắt buộc), `path` (tùy chọn)
-- **`batch_delete_projects`**: Xóa hàng loạt dự án theo mảng ID (bảo vệ chống xóa `global`).
+- **`delete_projects`**: Xóa hàng loạt dự án theo mảng ID (bảo vệ chống xóa `global`).
   - *Tham số*: `project_ids` (mảng chuỗi ID)
 
-### 2. Thao tác Trí nhớ (Batch-First & Smart Upsert)
-- **`batch_add_memories`**: Thêm hoặc cập nhật (Smart Upsert) hàng loạt trí nhớ với thuật toán khử trùng lặp Jaccard Similarity.
+### 2. Thao tác Trí nhớ (Smart Upsert & Retrieval)
+- **`add_memories`**: Thêm hoặc cập nhật (Smart Upsert) hàng loạt trí nhớ với thuật toán khử trùng lặp Jaccard Similarity.
   - *Tham số*: `project_id` (bắt buộc), `items` (mảng đối tượng `{ content, is_permanent, tags, metadata }`)
 - **`get_memories`**: Lấy danh sách trí nhớ đang active xếp theo thứ tự tính vĩnh viễn và thời gian mới nhất.
   - *Tham số*: `project_id` (bắt buộc), `limit` (mặc định 100), `tags` (tùy chọn), `is_permanent` (tùy chọn)
 - **`search_memories`**: Tìm kiếm toàn văn FTS5 BM25 theo độ liên quan trên nội dung và tag.
   - *Tham số*: `project_id` (bắt buộc), `query` (chuỗi từ khóa), `limit` (số lượng)
-- **`get_memory_by_id`**: Tra cứu thông tin một dòng trí nhớ theo Memory ID.
+- **`get_memory`**: Tra cứu thông tin một dòng trí nhớ theo Memory ID.
   - *Tham số*: `memory_id` (bắt buộc)
-- **`batch_delete_memories`**: Xóa hàng loạt trí nhớ theo mảng Memory ID.
+- **`delete_memories`**: Xóa hàng loạt trí nhớ theo mảng Memory ID.
   - *Tham số*: `memory_ids` (mảng chuỗi ID)
-- **`batch_toggle_permanence`**: Cập nhật trạng thái vĩnh viễn cho hàng loạt trí nhớ.
+- **`toggle_permanence`**: Cập nhật trạng thái vĩnh viễn cho hàng loạt trí nhớ.
   - *Tham số*: `memory_ids` (mảng chuỗi ID), `is_permanent` (boolean)
 
 ### 3. Phân tích & Bảo trì
-- **`get_memory_stats`**: Thống kê chỉ số sử dụng database (tổng dự án, tổng trí nhớ, vĩnh viễn vs ngắn hạn, dung lượng file).
+- **`memory_stats`**: Thống kê chỉ số sử dụng database (tổng dự án, tổng trí nhớ, vĩnh viễn vs ngắn hạn, dung lượng file).
   - *Tham số*: Không có
-- **`cleanup_expired`**: Thanh lý các trí nhớ ngắn hạn quá 30 ngày hoặc vượt ngưỡng 50 mục.
+- **`cleanup`**: Thanh lý các trí nhớ ngắn hạn quá 30 ngày hoặc vượt ngưỡng 50 mục.
   - *Tham số*: `project_id` (bắt buộc), `max_memories` (mặc định 50), `expire_days` (mặc định 30)
 
 ---
