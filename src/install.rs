@@ -63,6 +63,16 @@ pub fn run_install_mode() {
         }
     }
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = fs::metadata(&target_exe) {
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            let _ = fs::set_permissions(&target_exe, permissions);
+        }
+    }
+
     // 2. Extract embedded plugin files to target directory, replacing placeholder command with absolute binary path
     let target_exe_str = target_exe.to_string_lossy().replace('\\', "/");
 

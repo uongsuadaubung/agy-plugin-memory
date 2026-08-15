@@ -237,7 +237,7 @@ pub fn set_active_workspace(
 
 pub fn get_active_workspace() -> Option<(String, String, String)> {
     let conn = get_db_connection().ok()?;
-    let ppid = crate::project::get_parent_pid();
+    let ppid = crate::process::get_parent_pid();
 
     // Ưu tiên 1: Tra cứu theo Parent Process ID của chính cửa sổ này
     if ppid > 0 {

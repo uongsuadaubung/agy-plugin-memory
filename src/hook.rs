@@ -84,7 +84,7 @@ pub fn run_hook_mode() {
         return;
     }
 
-    let parent_pid = crate::project::get_parent_pid();
+    let parent_pid = crate::process::get_parent_pid();
     if let Some(primary_proj) = projects.first() {
         let _ = crate::db::set_active_workspace(
             &primary_proj.path,

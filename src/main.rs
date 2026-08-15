@@ -3,6 +3,7 @@ mod export_import;
 mod hook;
 mod install;
 mod mcp;
+mod process;
 mod project;
 mod similarity;
 mod uninstall;
