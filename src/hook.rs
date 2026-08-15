@@ -56,24 +56,17 @@ pub fn run_hook_mode() {
     let mut seen_project_ids = std::collections::HashSet::new();
 
     if workspace_paths.is_empty() {
-        if let Ok(root_path) = find_project_root(None) {
+        println!("{}", json!({ "injectSteps": [] }));
+        return;
+    }
+
+    for wp in &workspace_paths {
+        if let Ok(root_path) = find_project_root(Some(wp)) {
             let root_str = root_path.to_string_lossy();
             if let Ok(proj) = get_project(None, Some(&root_str), true) {
                 if !seen_project_ids.contains(&proj.id) {
                     seen_project_ids.insert(proj.id.clone());
                     projects.push(proj);
-                }
-            }
-        }
-    } else {
-        for wp in &workspace_paths {
-            if let Ok(root_path) = find_project_root(Some(wp)) {
-                let root_str = root_path.to_string_lossy();
-                if let Ok(proj) = get_project(None, Some(&root_str), true) {
-                    if !seen_project_ids.contains(&proj.id) {
-                        seen_project_ids.insert(proj.id.clone());
-                        projects.push(proj);
-                    }
                 }
             }
         }

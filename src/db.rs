@@ -199,15 +199,7 @@ pub fn set_active_workspace(
     let conn = get_db_connection()?;
     let now = Utc::now().to_rfc3339();
 
-    // 1. Lưu session_key = 'latest' cho fallback chung
-    let _ = conn.execute(
-        "INSERT INTO active_sessions (session_key, workspace_path, project_id, project_name, updated_at)
-         VALUES ('latest', ?1, ?2, ?3, ?4)
-         ON CONFLICT(session_key) DO UPDATE SET workspace_path = ?1, project_id = ?2, project_name = ?3, updated_at = ?4",
-        params![path, project_id, project_name, now],
-    );
-
-    // 2. Lưu theo Parent Process ID để cô lập tuyệt đối giữa Window A và Window B
+    // 1. Lưu theo Parent Process ID để cô lập tuyệt đối giữa các cửa sổ
     if parent_pid > 0 {
         let ppid_key = format!("ppid_{parent_pid}");
         let _ = conn.execute(
@@ -218,7 +210,7 @@ pub fn set_active_workspace(
         );
     }
 
-    // 3. Lưu theo Conversation ID nếu có
+    // 2. Lưu theo Conversation ID nếu có
     if let Some(cid) = conversation_id {
         let trimmed = cid.trim();
         if !trimmed.is_empty() {
@@ -239,7 +231,7 @@ pub fn get_active_workspace() -> Option<(String, String, String)> {
     let conn = get_db_connection().ok()?;
     let ppid = crate::process::get_parent_pid();
 
-    // Ưu tiên 1: Tra cứu theo Parent Process ID của chính cửa sổ này
+    // Duy nhất: Tra cứu theo Parent Process ID của chính tiến trình này
     if ppid > 0 {
         let ppid_key = format!("ppid_{ppid}");
         let res = conn.query_row(
@@ -252,12 +244,7 @@ pub fn get_active_workspace() -> Option<(String, String, String)> {
         }
     }
 
-    // Ưu tiên 2: Fallback lấy session 'latest'
-    conn.query_row(
-        "SELECT workspace_path, project_id, project_name FROM active_sessions WHERE session_key = 'latest'",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).ok()
+    None
 }
 
 pub fn extract_tags_from_content(content: &str) -> Vec<String> {
@@ -314,7 +301,7 @@ pub fn resolve_target_project_id(
         if !trimmed.is_empty() {
             let found_id: Option<String> = conn
                 .query_row(
-                    "SELECT id FROM projects WHERE id = ?1 OR name = ?1 COLLATE NOCASE LIMIT 1",
+                    "SELECT id FROM projects WHERE id = ?1 OR name = ?1 OR path = ?1 COLLATE NOCASE LIMIT 1",
                     params![trimmed],
                     |row| row.get(0),
                 )
@@ -323,27 +310,17 @@ pub fn resolve_target_project_id(
             if let Some(id) = found_id {
                 return Ok(id);
             }
-        }
-    }
 
-    match get_project(None, path, create_if_absent) {
-        Ok(proj) => Ok(proj.id),
-        Err(_) => {
-            let fallback_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM projects WHERE id != 'global' ORDER BY last_active DESC LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            if let Some(id) = fallback_id {
-                Ok(id)
-            } else {
-                Ok("global".to_string())
+            if trimmed.contains('/') || trimmed.contains('\\') {
+                if let Ok(proj) = get_project(None, Some(trimmed), create_if_absent) {
+                    return Ok(proj.id);
+                }
             }
         }
     }
+
+    let proj = get_project(None, path, create_if_absent)?;
+    Ok(proj.id)
 }
 
 pub fn get_project(
@@ -354,23 +331,8 @@ pub fn get_project(
     let conn = get_db_connection()?;
     let now = Utc::now().to_rfc3339();
 
-    let auto_proj = match get_auto_detected_project(name, path) {
-        Ok(p) => p,
-        Err(e) => {
-            let fallback: rusqlite::Result<ProjectRecord> = conn.query_row(
-                "SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids
-                 FROM projects WHERE id != 'global' ORDER BY last_active DESC LIMIT 1",
-                [],
-                map_project_row,
-            );
-
-            if let Ok(proj) = fallback {
-                return Ok(proj);
-            } else {
-                return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))));
-            }
-        }
-    };
+    let auto_proj = get_auto_detected_project(name, path)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
 
     let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids FROM projects WHERE id = ?1")?;
     let existing = stmt.query_row(params![auto_proj.id], map_project_row);

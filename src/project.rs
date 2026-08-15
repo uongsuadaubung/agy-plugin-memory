@@ -38,10 +38,7 @@ pub fn hash_project_path(path: &Path) -> String {
 pub fn find_project_root(starting_path: Option<&str>) -> Result<PathBuf, String> {
     let start = match starting_path {
         Some(p) if !p.trim().is_empty() => PathBuf::from(p.trim()),
-        _ => match std::env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(_) => return Err("No project path provided and current working directory could not be determined.".to_string()),
-        },
+        _ => return Err("No project path provided.".to_string()),
     };
 
     let canonical = start.canonicalize().unwrap_or(start);
@@ -71,40 +68,70 @@ pub fn get_auto_detected_project(
     name_override: Option<&str>,
     path_override: Option<&str>,
 ) -> Result<DetectedProject, String> {
-    let root = match find_project_root(path_override) {
-        Ok(r) => r,
-        Err(e) => {
-            if path_override.is_none() {
-                if let Some((wpath, pid, pname)) = crate::db::get_active_workspace() {
-                    return Ok(DetectedProject {
-                        id: pid,
-                        name: name_override.map(String::from).unwrap_or(pname),
-                        path: wpath,
-                    });
-                }
-            }
-            return Err(e);
+    if let Some(path) = path_override {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            let root = find_project_root(Some(trimmed))?;
+            let id = hash_project_path(&root);
+
+            let raw_str = root.to_string_lossy();
+            let clean_path = raw_str
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&raw_str)
+                .to_string();
+
+            let name = match name_override {
+                Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+                _ => root
+                    .file_name()
+                    .map(|os| os.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown-project".to_string()),
+            };
+
+            return Ok(DetectedProject {
+                id,
+                name,
+                path: clean_path,
+            });
         }
-    };
-    let id = hash_project_path(&root);
+    }
 
-    let raw_str = root.to_string_lossy();
-    let clean_path = raw_str
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&raw_str)
-        .to_string();
+    if let Some((wpath, pid, pname)) = crate::db::get_active_workspace() {
+        let final_name = match name_override {
+            Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+            _ => pname,
+        };
+        return Ok(DetectedProject {
+            id: pid,
+            name: final_name,
+            path: wpath,
+        });
+    }
 
-    let name = match name_override {
-        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
-        _ => root
-            .file_name()
-            .map(|os| os.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unknown-project".to_string()),
-    };
+    Err("No active workspace session found in active_sessions database.".to_string())
+}
 
-    Ok(DetectedProject {
-        id,
-        name,
-        path: clean_path,
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_auto_detected_project_with_active_session() {
+        let dummy_path = "C:/test/workspace/my-custom-project";
+        let dummy_id = "testproj1234";
+        let dummy_name = "my-custom-project";
+
+        let _ = crate::db::set_active_workspace(
+            dummy_path,
+            dummy_id,
+            dummy_name,
+            crate::process::get_parent_pid(),
+            None,
+        );
+
+        let detected = get_auto_detected_project(None, None).expect("Should detect active workspace");
+        assert_eq!(detected.id, dummy_id);
+        assert_eq!(detected.name, dummy_name);
+        assert_eq!(detected.path, dummy_path);
+    }
 }
