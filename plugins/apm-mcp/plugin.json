@@ -1,5 +1,5 @@
 {
   "name": "apm-mcp",
-  "version": "1.0.0",
-  "description": "Smart Project & Global Memory Management Plugin powered by Bun, bun:sqlite, and Antigravity Lifecycle Hooks"
+  "version": "1.1.0",
+  "description": "High-Performance Project & Global Memory Management Plugin for Antigravity (Pure Rust Engine with SQLite FTS5 & PreInvocation Hooks)"
 }

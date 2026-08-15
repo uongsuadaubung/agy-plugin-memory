@@ -2,6 +2,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -127,7 +128,8 @@ pub fn get_db_connection() -> Result<Connection> {
               path TEXT NOT NULL,
               created_at TEXT NOT NULL,
               last_active TEXT NOT NULL,
-              memory_count INTEGER DEFAULT 0
+              memory_count INTEGER DEFAULT 0,
+              linked_project_ids TEXT DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS memories (
@@ -165,12 +167,14 @@ pub fn get_db_connection() -> Result<Connection> {
                 DELETE FROM memories_fts WHERE id = old.id;
                 INSERT INTO memories_fts(id, project_id, content, tags) VALUES (new.id, new.project_id, new.content, new.tags);
             END;
+            CREATE TABLE IF NOT EXISTS active_sessions (
+                session_key TEXT PRIMARY KEY,
+                workspace_path TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             ",
-        );
-
-        let _ = conn.execute(
-            "ALTER TABLE projects ADD COLUMN linked_project_ids TEXT DEFAULT '[]'",
-            [],
         );
 
         let now = Utc::now().to_rfc3339();
@@ -185,15 +189,188 @@ pub fn get_db_connection() -> Result<Connection> {
     Ok(conn)
 }
 
+pub fn set_active_workspace(
+    path: &str,
+    project_id: &str,
+    project_name: &str,
+    parent_pid: u32,
+    conversation_id: Option<&str>,
+) -> Result<()> {
+    let conn = get_db_connection()?;
+    let now = Utc::now().to_rfc3339();
+
+    // 1. Lưu session_key = 'latest' cho fallback chung
+    let _ = conn.execute(
+        "INSERT INTO active_sessions (session_key, workspace_path, project_id, project_name, updated_at)
+         VALUES ('latest', ?1, ?2, ?3, ?4)
+         ON CONFLICT(session_key) DO UPDATE SET workspace_path = ?1, project_id = ?2, project_name = ?3, updated_at = ?4",
+        params![path, project_id, project_name, now],
+    );
+
+    // 2. Lưu theo Parent Process ID để cô lập tuyệt đối giữa Window A và Window B
+    if parent_pid > 0 {
+        let ppid_key = format!("ppid_{parent_pid}");
+        let _ = conn.execute(
+            "INSERT INTO active_sessions (session_key, workspace_path, project_id, project_name, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(session_key) DO UPDATE SET workspace_path = ?2, project_id = ?3, project_name = ?4, updated_at = ?5",
+            params![ppid_key, path, project_id, project_name, now],
+        );
+    }
+
+    // 3. Lưu theo Conversation ID nếu có
+    if let Some(cid) = conversation_id {
+        let trimmed = cid.trim();
+        if !trimmed.is_empty() {
+            let conv_key = format!("conv_{trimmed}");
+            let _ = conn.execute(
+                "INSERT INTO active_sessions (session_key, workspace_path, project_id, project_name, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(session_key) DO UPDATE SET workspace_path = ?2, project_id = ?3, project_name = ?4, updated_at = ?5",
+                params![conv_key, path, project_id, project_name, now],
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub fn get_active_workspace() -> Option<(String, String, String)> {
+    let conn = get_db_connection().ok()?;
+    let ppid = crate::project::get_parent_pid();
+
+    // Ưu tiên 1: Tra cứu theo Parent Process ID của chính cửa sổ này
+    if ppid > 0 {
+        let ppid_key = format!("ppid_{ppid}");
+        let res = conn.query_row(
+            "SELECT workspace_path, project_id, project_name FROM active_sessions WHERE session_key = ?1",
+            params![ppid_key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+        if let Ok(val) = res {
+            return Some(val);
+        }
+    }
+
+    // Ưu tiên 2: Fallback lấy session 'latest'
+    conn.query_row(
+        "SELECT workspace_path, project_id, project_name FROM active_sessions WHERE session_key = 'latest'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).ok()
+}
+
+pub fn extract_tags_from_content(content: &str) -> Vec<String> {
+    let mut tags = HashSet::new();
+
+    if let Some(start) = content.find("**") {
+        if let Some(end) = content[start + 2..].find("**") {
+            let header = &content[start + 2..start + 2 + end];
+            let clean = header.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ' && c != '_');
+            let tag = clean.to_lowercase().replace(' ', "_");
+            if !tag.is_empty() && tag.len() <= 40 {
+                tags.insert(tag);
+            }
+        }
+    }
+
+    let lower = content.to_lowercase();
+    let keywords = [
+        "typescript", "javascript", "python", "rust", "react", "solidjs", "vue", "svelte",
+        "tailwind", "scss", "css", "clean_code", "refactor", "error_handling", "git", "bun",
+        "npm", "pnpm", "yarn", "database", "sqlite", "postgres", "auth", "security", "rule",
+    ];
+
+    for kw in keywords {
+        if lower.contains(kw) {
+            tags.insert((*kw).to_string());
+        }
+    }
+
+    if tags.is_empty() {
+        vec!["rule".to_string()]
+    } else {
+        tags.into_iter().collect()
+    }
+}
+
+pub fn resolve_target_project_id(
+    is_global: bool,
+    project_override: Option<&str>,
+    path: Option<&str>,
+    create_if_absent: bool,
+) -> Result<String> {
+    if is_global {
+        return Ok("global".to_string());
+    }
+
+    let conn = get_db_connection()?;
+
+    if let Some(p) = project_override {
+        let trimmed = p.trim();
+        if trimmed.eq_ignore_ascii_case("global") {
+            return Ok("global".to_string());
+        }
+        if !trimmed.is_empty() {
+            let found_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM projects WHERE id = ?1 OR name = ?1 COLLATE NOCASE LIMIT 1",
+                    params![trimmed],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let Some(id) = found_id {
+                return Ok(id);
+            }
+        }
+    }
+
+    match get_project(None, path, create_if_absent) {
+        Ok(proj) => Ok(proj.id),
+        Err(_) => {
+            let fallback_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM projects WHERE id != 'global' ORDER BY last_active DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let Some(id) = fallback_id {
+                Ok(id)
+            } else {
+                Ok("global".to_string())
+            }
+        }
+    }
+}
+
 pub fn get_project(
     name: Option<&str>,
     path: Option<&str>,
     create_if_absent: bool,
 ) -> Result<ProjectRecord> {
-    let auto_proj = get_auto_detected_project(name, path)
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
     let conn = get_db_connection()?;
     let now = Utc::now().to_rfc3339();
+
+    let auto_proj = match get_auto_detected_project(name, path) {
+        Ok(p) => p,
+        Err(e) => {
+            let fallback: rusqlite::Result<ProjectRecord> = conn.query_row(
+                "SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids
+                 FROM projects WHERE id != 'global' ORDER BY last_active DESC LIMIT 1",
+                [],
+                map_project_row,
+            );
+
+            if let Ok(proj) = fallback {
+                return Ok(proj);
+            } else {
+                return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))));
+            }
+        }
+    };
 
     let mut stmt = conn.prepare("SELECT id, name, path, created_at, last_active, memory_count, linked_project_ids FROM projects WHERE id = ?1")?;
     let existing = stmt.query_row(params![auto_proj.id], map_project_row);
@@ -255,86 +432,213 @@ pub fn get_project(
     Ok(new_proj)
 }
 
-pub fn resolve_target_project_id(
-    project_id: &str,
-    path: Option<&str>,
-    create_if_absent: bool,
-) -> Result<String> {
-    if project_id == "global" {
-        return Ok("global".to_string());
-    }
+fn build_fts5_query(raw: &str) -> String {
+    let terms: Vec<String> = raw
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty() && w.len() > 1)
+        .map(|w| format!("\"{w}\"*"))
+        .collect();
 
+    if terms.is_empty() {
+        format!("\"{}\"*", raw.trim().replace('"', ""))
+    } else {
+        terms.join(" AND ")
+    }
+}
+
+pub fn get_memories(
+    query: Option<&str>,
+    limit: usize,
+    tags_filter: Option<Vec<String>>,
+    is_permanent: Option<bool>,
+    is_global: bool,
+    project_override: Option<&str>,
+    path: Option<&str>,
+) -> Result<Vec<MemoryRecord>> {
     let conn = get_db_connection()?;
 
-    if !project_id.trim().is_empty() && project_id != "368a02e91649" {
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
-                params![project_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
+    let project_ids = if is_global {
+        vec!["global".to_string()]
+    } else {
+        let target_id = resolve_target_project_id(false, project_override, path, false)?;
+        let linked = get_linked_project_ids(&target_id);
+        let mut ids = vec![target_id, "global".to_string()];
+        for lid in linked {
+            if !ids.contains(&lid) {
+                ids.push(lid);
+            }
+        }
+        ids
+    };
 
-        if exists {
-            return Ok(project_id.to_string());
+    if project_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let placeholders: Vec<String> = (1..=project_ids.len()).map(|i| format!("?{i}")).collect();
+    let in_clause = placeholders.join(", ");
+
+    let mut result = Vec::new();
+
+    if let Some(q) = query {
+        let clean_q = q.trim();
+        if !clean_q.is_empty() {
+            let fts_query = build_fts5_query(clean_q);
+            let fts_sql = format!(
+                "SELECT m.id, m.project_id, m.content, m.tags, m.metadata, m.is_permanent, m.created_at, m.tokens_estimated
+                 FROM memories_fts fts
+                 JOIN memories m ON fts.id = m.id
+                 WHERE m.project_id IN ({in_clause}) AND memories_fts MATCH ?{}
+                 ORDER BY bm25(memories_fts), m.is_permanent DESC, m.created_at DESC",
+                project_ids.len() + 1
+            );
+
+            if let Ok(mut stmt) = conn.prepare(&fts_sql) {
+                let mut params_vec: Vec<rusqlite::types::Value> = project_ids
+                    .iter()
+                    .map(|id| rusqlite::types::Value::Text(id.clone()))
+                    .collect();
+                params_vec.push(rusqlite::types::Value::Text(fts_query));
+
+                let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), map_memory_row);
+                if let Ok(rows) = rows {
+                    for r in rows.flatten() {
+                        result.push(r);
+                    }
+                }
+            }
+
+            if result.is_empty() {
+                let pattern = format!("%{}%", clean_q.to_lowercase());
+                let fallback_sql = format!(
+                    "SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated
+                     FROM memories WHERE project_id IN ({in_clause}) AND (LOWER(content) LIKE ?{} OR LOWER(tags) LIKE ?{})
+                     ORDER BY is_permanent DESC, created_at DESC",
+                    project_ids.len() + 1,
+                    project_ids.len() + 2
+                );
+
+                if let Ok(mut stmt) = conn.prepare(&fallback_sql) {
+                    let mut params_vec: Vec<rusqlite::types::Value> = project_ids
+                        .iter()
+                        .map(|id| rusqlite::types::Value::Text(id.clone()))
+                        .collect();
+                    params_vec.push(rusqlite::types::Value::Text(pattern.clone()));
+                    params_vec.push(rusqlite::types::Value::Text(pattern));
+
+                    let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), map_memory_row);
+                    if let Ok(rows) = rows {
+                        for r in rows.flatten() {
+                            result.push(r);
+                        }
+                    }
+                }
+            }
         }
     }
 
-    let proj = get_project(None, path, create_if_absent)?;
-    Ok(proj.id)
+    if query.map_or(true, |q| q.trim().is_empty()) {
+        let sql = format!(
+            "SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated
+             FROM memories WHERE project_id IN ({in_clause})
+             ORDER BY is_permanent DESC, created_at DESC"
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params_vec: Vec<rusqlite::types::Value> = project_ids
+            .iter()
+            .map(|id| rusqlite::types::Value::Text(id.clone()))
+            .collect();
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), map_memory_row)?;
+        for r in rows.flatten() {
+            result.push(r);
+        }
+    }
+
+    let mut filtered = Vec::new();
+    for r in result {
+        if let Some(perm) = is_permanent {
+            if r.is_permanent != perm {
+                continue;
+            }
+        }
+        if let Some(ref filter_tags) = tags_filter {
+            if !filter_tags.is_empty() {
+                let has_match = filter_tags.iter().any(|t| r.tags.contains(t));
+                if !has_match {
+                    continue;
+                }
+            }
+        }
+        filtered.push(r);
+    }
+
+    filtered.truncate(limit);
+    Ok(filtered)
 }
 
 pub fn add_memories(
-    project_id: &str,
     items: Vec<BatchMemoryItem>,
+    is_global: bool,
+    project_override: Option<&str>,
     path: Option<&str>,
 ) -> Result<Vec<MemoryRecord>> {
     let mut conn = get_db_connection()?;
-    let target_id = resolve_target_project_id(project_id, path, true)?;
+    let target_id = resolve_target_project_id(is_global, project_override, path, true)?;
     let tx = conn.transaction()?;
+
+    let mut existing_mems = Vec::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated
+             FROM memories WHERE project_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![target_id], map_memory_row)?;
+        for r in rows.flatten() {
+            existing_mems.push(r);
+        }
+    }
 
     let mut results = Vec::new();
     let now = Utc::now().to_rfc3339();
 
     for (idx, item) in items.into_iter().enumerate() {
         let trimmed_content = item.content.trim();
-        let is_permanent = item.is_permanent.unwrap_or(false);
-        let tags = item.tags.unwrap_or_default();
-        let metadata = item.metadata.unwrap_or(json!({}));
-
-        let mut existing_id: Option<String> = None;
-        let mut final_is_permanent = is_permanent;
-
-        {
-            let mut stmt = tx.prepare("SELECT id, content, is_permanent FROM memories WHERE project_id = ?1")?;
-            let existing_rows: Vec<(String, String, i32)> = stmt
-                .query_map(params![target_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-                .flatten()
-                .collect();
-
-            for (eid, econtent, eperm) in existing_rows {
-                if is_similar_or_replacement(trimmed_content, &econtent) {
-                    existing_id = Some(eid);
-                    if eperm == 1 {
-                        final_is_permanent = true;
-                    }
-                    break;
-                }
-            }
+        if trimmed_content.is_empty() {
+            continue;
         }
+
+        let tags = match item.tags {
+            Some(t) if !t.is_empty() => t,
+            _ => extract_tags_from_content(trimmed_content),
+        };
+
+        let metadata = item.metadata.unwrap_or_else(|| json!({}));
+        let is_permanent = item.is_permanent.unwrap_or(false);
+        let tokens_estimated = (trimmed_content.len() / 4).max(1) as i64;
 
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
         let meta_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
-        let tokens_estimated = ((trimmed_content.len() as f64) / 4.0).ceil() as i64;
 
-        let mem_id = if let Some(eid) = existing_id {
+        let mut matched_id = None;
+        for em in &existing_mems {
+            if is_similar_or_replacement(trimmed_content, &em.content) {
+                matched_id = Some(em.id.clone());
+                break;
+            }
+        }
+
+        let mem_id = if let Some(eid) = matched_id {
             tx.execute(
-                "UPDATE memories SET content = ?1, tags = ?2, metadata = ?3, is_permanent = ?4, created_at = ?5, tokens_estimated = ?6 WHERE id = ?7",
+                "UPDATE memories
+                 SET content = ?1, tags = ?2, metadata = ?3, is_permanent = ?4, created_at = ?5, tokens_estimated = ?6
+                 WHERE id = ?7",
                 params![
                     trimmed_content,
                     tags_json,
                     meta_json,
-                    if final_is_permanent { 1 } else { 0 },
+                    if is_permanent { 1 } else { 0 },
                     now,
                     tokens_estimated,
                     eid
@@ -385,285 +689,32 @@ pub fn add_memories(
 
     tx.commit()?;
 
-    let _ = cleanup(&target_id, 50, 30, path);
+    let _ = cleanup(is_global, project_override, 50, 30, path);
+
+    if let Ok(c) = get_db_connection() {
+        let _ = c.execute("PRAGMA optimize;", []);
+    }
 
     Ok(results)
 }
 
-pub fn get_memories(
-    project_id: &str,
-    limit: usize,
-    tags_filter: Option<Vec<String>>,
-    is_permanent: Option<bool>,
-    path: Option<&str>,
-) -> Result<Vec<MemoryRecord>> {
-    let target_id = resolve_target_project_id(project_id, path, false)?;
-
+pub fn get_memory(memory_id: &str) -> Result<Option<MemoryRecord>> {
     let conn = get_db_connection()?;
     let mut stmt = conn.prepare(
         "SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated
-         FROM memories WHERE project_id = ?1 ORDER BY is_permanent DESC, created_at DESC",
+         FROM memories WHERE id = ?1",
     )?;
 
-    let rows = stmt.query_map(params![target_id], map_memory_row)?;
-
-    let mut result = Vec::new();
-
-    for r in rows.flatten() {
-        if let Some(perm) = is_permanent {
-            if r.is_permanent != perm {
-                continue;
-            }
-        }
-        if let Some(ref filter_tags) = tags_filter {
-            if !filter_tags.is_empty() {
-                let has_match = filter_tags.iter().any(|t| r.tags.contains(t));
-                if !has_match {
-                    continue;
-                }
-            }
-        }
-
-        result.push(r);
-    }
-
-    result.truncate(limit);
-    Ok(result)
-}
-
-fn build_fts5_query(raw: &str) -> String {
-    let terms: Vec<String> = raw
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|w| !w.is_empty() && w.len() > 1)
-        .map(|w| format!("\"{w}\"*"))
-        .collect();
-
-    if terms.is_empty() {
-        format!("\"{}\"*", raw.trim().replace('"', ""))
+    let mut rows = stmt.query(params![memory_id])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(map_memory_row(row)?))
     } else {
-        terms.join(" AND ")
+        Ok(None)
     }
-}
-
-pub fn search_memories(
-    project_id: &str,
-    query: &str,
-    limit: usize,
-    path: Option<&str>,
-) -> Result<Vec<MemoryRecord>> {
-    let target_id = resolve_target_project_id(project_id, path, false)?;
-
-    let conn = get_db_connection()?;
-    let fts_query = build_fts5_query(query);
-
-    let fts_result = conn.prepare(
-        "SELECT m.id, m.project_id, m.content, m.tags, m.metadata, m.is_permanent, m.created_at, m.tokens_estimated
-         FROM memories_fts fts
-         JOIN memories m ON fts.id = m.id
-         WHERE m.project_id = ?1 AND memories_fts MATCH ?2
-         ORDER BY bm25(memories_fts), m.is_permanent DESC, m.created_at DESC",
-    );
-
-    let mut result = Vec::new();
-
-    if let Ok(mut stmt) = fts_result {
-        let rows = stmt.query_map(params![target_id, fts_query], map_memory_row);
-
-        if let Ok(rows) = rows {
-            for r in rows.flatten() {
-                result.push(r);
-            }
-        }
-    }
-
-    if result.is_empty() {
-        let pattern = format!("%{}%", query.to_lowercase());
-        let mut stmt = conn.prepare(
-            "SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated
-             FROM memories WHERE project_id = ?1 AND (LOWER(content) LIKE ?2 OR LOWER(tags) LIKE ?2)
-             ORDER BY is_permanent DESC, created_at DESC",
-        )?;
-
-        let rows = stmt.query_map(params![target_id, pattern], map_memory_row);
-
-        if let Ok(rows) = rows {
-            for r in rows.flatten() {
-                result.push(r);
-            }
-        }
-    }
-
-    result.truncate(limit);
-    Ok(result)
-}
-
-pub fn delete_memories(memory_ids: Vec<String>) -> Result<usize> {
-    if memory_ids.is_empty() {
-        return Ok(0);
-    }
-    let mut conn = get_db_connection()?;
-    let tx = conn.transaction()?;
-    let count;
-    {
-        let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{}", i)).collect();
-        let sql = format!("DELETE FROM memories WHERE id IN ({})", placeholders.join(","));
-        let mut stmt = tx.prepare(&sql)?;
-        count = stmt.execute(rusqlite::params_from_iter(memory_ids.iter()))?;
-    }
-    tx.commit()?;
-    Ok(count)
-}
-
-pub fn delete_projects(project_ids: Vec<String>) -> Result<usize> {
-    let safe_ids: Vec<String> = project_ids.into_iter().filter(|id| id != "global").collect();
-    if safe_ids.is_empty() {
-        return Ok(0);
-    }
-    let mut conn = get_db_connection()?;
-    let tx = conn.transaction()?;
-    let count;
-    {
-        let placeholders: Vec<String> = (1..=safe_ids.len()).map(|i| format!("?{}", i)).collect();
-
-        let sql_m = format!("DELETE FROM memories WHERE project_id IN ({})", placeholders.join(","));
-        let mut stmt_m = tx.prepare(&sql_m)?;
-        let _ = stmt_m.execute(rusqlite::params_from_iter(safe_ids.iter()));
-
-        let sql_p = format!("DELETE FROM projects WHERE id IN ({}) AND id != 'global'", placeholders.join(","));
-        let mut stmt_p = tx.prepare(&sql_p)?;
-        count = stmt_p.execute(rusqlite::params_from_iter(safe_ids.iter()))?;
-    }
-    tx.commit()?;
-    Ok(count)
-}
-
-pub fn toggle_permanence(memory_ids: Vec<String>, is_permanent: bool) -> Result<usize> {
-    if memory_ids.is_empty() {
-        return Ok(0);
-    }
-    let mut conn = get_db_connection()?;
-    let tx = conn.transaction()?;
-    let count;
-    {
-        let perm_int = if is_permanent { 1 } else { 0 };
-
-        let placeholders: Vec<String> = (2..=memory_ids.len() + 1).map(|i| format!("?{}", i)).collect();
-        let sql = format!("UPDATE memories SET is_permanent = ?1 WHERE id IN ({})", placeholders.join(","));
-        let mut stmt = tx.prepare(&sql)?;
-
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        params_vec.push(Box::new(perm_int));
-        for id in &memory_ids {
-            params_vec.push(Box::new(id.clone()));
-        }
-
-        count = stmt.execute(rusqlite::params_from_iter(params_vec.iter().map(|b| b.as_ref())))?;
-    }
-    tx.commit()?;
-    Ok(count)
-}
-
-pub fn move_memories(
-    memory_ids: Vec<String>,
-    target_project_id: &str,
-) -> Result<usize> {
-    if memory_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let mut conn = get_db_connection()?;
-
-    if target_project_id != "global" {
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
-                params![target_project_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(false);
-        if !exists {
-            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Target project '{}' does not exist.", target_project_id),
-                ),
-            )));
-        }
-    }
-
-    let mut affected_source_projects: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    {
-        let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{}", i)).collect();
-        let sql = format!("SELECT DISTINCT project_id FROM memories WHERE id IN ({})", placeholders.join(","));
-        if let Ok(mut stmt) = conn.prepare(&sql) {
-            let rows = stmt.query_map(rusqlite::params_from_iter(memory_ids.iter()), |r| r.get::<_, String>(0));
-            if let Ok(rows) = rows {
-                for r in rows.flatten() {
-                    if r != "global" && r != target_project_id {
-                        affected_source_projects.insert(r);
-                    }
-                }
-            }
-        }
-    }
-
-    let moved_count: usize;
-    let tx = conn.transaction()?;
-    {
-        let placeholders: Vec<String> = (2..=memory_ids.len() + 1).map(|i| format!("?{}", i)).collect();
-        let sql = format!(
-            "UPDATE memories SET project_id = ?1 WHERE id IN ({})",
-            placeholders.join(",")
-        );
-        let mut stmt = tx.prepare(&sql)?;
-
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        params_vec.push(Box::new(target_project_id.to_string()));
-        for id in &memory_ids {
-            params_vec.push(Box::new(id.clone()));
-        }
-
-        moved_count = stmt.execute(rusqlite::params_from_iter(params_vec.iter().map(|b| b.as_ref())))?;
-    }
-    tx.commit()?;
-
-    if target_project_id != "global" {
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM memories WHERE project_id = ?1",
-            params![target_project_id],
-            |r| r.get(0),
-        )?;
-        conn.execute(
-            "UPDATE projects SET memory_count = ?1 WHERE id = ?2",
-            params![count, target_project_id],
-        )?;
-    }
-
-    for src_id in affected_source_projects {
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM memories WHERE project_id = ?1",
-            params![&src_id],
-            |r| r.get(0),
-        )?;
-        conn.execute(
-            "UPDATE projects SET memory_count = ?1 WHERE id = ?2",
-            params![count, src_id],
-        )?;
-    }
-
-    Ok(moved_count)
-}
-
-pub fn get_memory(memory_id: &str) -> Result<Option<MemoryRecord>> {
-    let conn = get_db_connection()?;
-    let mut stmt = conn.prepare("SELECT id, project_id, content, tags, metadata, is_permanent, created_at, tokens_estimated FROM memories WHERE id = ?1")?;
-    let res = stmt.query_row(params![memory_id], map_memory_row).ok();
-    Ok(res)
 }
 
 pub fn update_memory(
-    id: &str,
+    memory_id: &str,
     content: Option<&str>,
     tags: Option<Vec<String>>,
     metadata: Option<Value>,
@@ -671,34 +722,132 @@ pub fn update_memory(
 ) -> Result<Option<MemoryRecord>> {
     let conn = get_db_connection()?;
 
-    let current = match get_memory(id)? {
+    let existing = match get_memory(memory_id)? {
         Some(m) => m,
         None => return Ok(None),
     };
 
-    let new_content = content.unwrap_or(&current.content);
-    let new_tags = tags.unwrap_or(current.tags);
-    let new_metadata = metadata.unwrap_or(current.metadata);
-    let new_is_permanent = is_permanent.unwrap_or(current.is_permanent);
+    let new_content = content.unwrap_or(&existing.content).trim();
+    let new_tags = tags.unwrap_or(existing.tags);
+    let new_metadata = metadata.unwrap_or(existing.metadata);
+    let new_permanent = is_permanent.unwrap_or(existing.is_permanent);
+    let tokens_estimated = (new_content.len() / 4).max(1) as i64;
+    let now = Utc::now().to_rfc3339();
 
     let tags_json = serde_json::to_string(&new_tags).unwrap_or_else(|_| "[]".to_string());
     let meta_json = serde_json::to_string(&new_metadata).unwrap_or_else(|_| "{}".to_string());
-    let perm_int = if new_is_permanent { 1 } else { 0 };
-    let tokens_estimated = (new_content.len() / 4) as i64;
 
     conn.execute(
-        "UPDATE memories SET content = ?1, tags = ?2, metadata = ?3, is_permanent = ?4, tokens_estimated = ?5 WHERE id = ?6",
+        "UPDATE memories
+         SET content = ?1, tags = ?2, metadata = ?3, is_permanent = ?4, created_at = ?5, tokens_estimated = ?6
+         WHERE id = ?7",
         params![
             new_content,
             tags_json,
             meta_json,
-            perm_int,
+            if new_permanent { 1 } else { 0 },
+            now,
             tokens_estimated,
-            id
+            memory_id
         ],
     )?;
 
-    get_memory(id)
+    get_memory(memory_id)
+}
+
+pub fn delete_memories(memory_ids: Vec<String>) -> Result<usize> {
+    if memory_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut conn = get_db_connection()?;
+    let tx = conn.transaction()?;
+
+    let mut affected_projects = HashSet::new();
+    for id in &memory_ids {
+        if let Ok(Some(m)) = get_memory(id) {
+            affected_projects.insert(m.project_id);
+        }
+    }
+
+    let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "DELETE FROM memories WHERE id IN ({})",
+        placeholders.join(", ")
+    );
+
+    let mut stmt = tx.prepare(&sql)?;
+    let params_vec: Vec<rusqlite::types::Value> = memory_ids
+        .into_iter()
+        .map(rusqlite::types::Value::Text)
+        .collect();
+
+    let deleted_count = stmt.execute(rusqlite::params_from_iter(params_vec))?;
+    drop(stmt);
+
+    let now = Utc::now().to_rfc3339();
+    for pid in affected_projects {
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memories WHERE project_id = ?1",
+            params![pid],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "UPDATE projects SET memory_count = ?1, last_active = ?2 WHERE id = ?3",
+            params![count, now, pid],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(deleted_count)
+}
+
+pub fn delete_projects(project_identifiers: Vec<String>) -> Result<usize> {
+    if project_identifiers.is_empty() {
+        return Ok(0);
+    }
+
+    let conn = get_db_connection()?;
+    let mut deleted_count = 0;
+
+    for ident in project_identifiers {
+        let trimmed = ident.trim();
+        if trimmed == "global" {
+            continue;
+        }
+
+        let res = conn.execute(
+            "DELETE FROM projects WHERE id = ?1 OR name = ?1 COLLATE NOCASE",
+            params![trimmed],
+        )?;
+        deleted_count += res;
+    }
+
+    Ok(deleted_count)
+}
+
+pub fn toggle_permanence(memory_ids: Vec<String>, is_permanent: bool) -> Result<usize> {
+    if memory_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let conn = get_db_connection()?;
+    let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "UPDATE memories SET is_permanent = ?{} WHERE id IN ({})",
+        memory_ids.len() + 1,
+        placeholders.join(", ")
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params_vec: Vec<rusqlite::types::Value> = memory_ids
+        .into_iter()
+        .map(rusqlite::types::Value::Text)
+        .collect();
+    params_vec.push(rusqlite::types::Value::Integer(if is_permanent { 1 } else { 0 }));
+
+    let count = stmt.execute(rusqlite::params_from_iter(params_vec))?;
+    Ok(count)
 }
 
 pub fn memory_stats() -> Result<MemoryStats> {
@@ -720,12 +869,12 @@ pub fn memory_stats() -> Result<MemoryStats> {
     })
 }
 
-pub fn clear_memories(project_id: &str, path: Option<&str>) -> Result<usize> {
-    let target_id = resolve_target_project_id(project_id, path, false)?;
-
-    if target_id == "global" {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
-    }
+pub fn clear_memories(
+    is_global: bool,
+    project_override: Option<&str>,
+    path: Option<&str>,
+) -> Result<usize> {
+    let target_id = resolve_target_project_id(is_global, project_override, path, false)?;
 
     let conn = get_db_connection()?;
     let deleted_count = conn.execute("DELETE FROM memories WHERE project_id = ?1", params![target_id])?;
@@ -735,23 +884,24 @@ pub fn clear_memories(project_id: &str, path: Option<&str>) -> Result<usize> {
 }
 
 pub fn link_projects(
-    project_id: &str,
-    target_project_ids: Vec<String>,
+    target_project: &str,
+    source_project: Option<&str>,
     path: Option<&str>,
 ) -> Result<ProjectRecord> {
-    let target_id = resolve_target_project_id(project_id, path, true)?;
+    let source_id = resolve_target_project_id(false, source_project, path, true)?;
+    let target_id = resolve_target_project_id(false, Some(target_project), None, false)?;
 
-    let filtered_targets: Vec<String> = target_project_ids
-        .into_iter()
-        .filter(|id| id != &target_id)
-        .collect();
+    let mut current_links = get_linked_project_ids(&source_id);
+    if target_id != source_id && target_id != "global" && !current_links.contains(&target_id) {
+        current_links.push(target_id);
+    }
 
-    let json_targets = serde_json::to_string(&filtered_targets).unwrap_or_else(|_| "[]".to_string());
+    let json_targets = serde_json::to_string(&current_links).unwrap_or_else(|_| "[]".to_string());
 
     let conn = get_db_connection()?;
     conn.execute(
         "UPDATE projects SET linked_project_ids = ?1 WHERE id = ?2",
-        params![json_targets, target_id],
+        params![json_targets, source_id],
     )?;
 
     get_project(None, path, false)
@@ -787,12 +937,16 @@ pub fn list_projects() -> Result<Vec<ProjectRecord>> {
 }
 
 pub fn cleanup(
-    project_id: &str,
+    is_global: bool,
+    project_override: Option<&str>,
     max_memories: usize,
     expire_days: i64,
     path: Option<&str>,
 ) -> Result<usize> {
-    let target_id = resolve_target_project_id(project_id, path, false)?;
+    let target_id = match resolve_target_project_id(is_global, project_override, path, false) {
+        Ok(id) => id,
+        Err(_) => return Ok(0),
+    };
 
     let conn = get_db_connection()?;
     let cutoff = (Utc::now() - chrono::Duration::days(expire_days)).to_rfc3339();
@@ -832,6 +986,62 @@ pub fn cleanup(
     )?;
 
     Ok(deleted_count)
+}
+
+pub fn move_memories(
+    memory_ids: Vec<String>,
+    target_is_global: bool,
+    target_project: Option<&str>,
+) -> Result<usize> {
+    if memory_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let target_id = resolve_target_project_id(target_is_global, target_project, None, true)?;
+    let mut conn = get_db_connection()?;
+    let tx = conn.transaction()?;
+
+    let mut source_project_ids = HashSet::new();
+    for id in &memory_ids {
+        if let Ok(Some(m)) = get_memory(id) {
+            source_project_ids.insert(m.project_id);
+        }
+    }
+
+    let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "UPDATE memories SET project_id = ?{} WHERE id IN ({})",
+        memory_ids.len() + 1,
+        placeholders.join(", ")
+    );
+
+    let mut stmt = tx.prepare(&sql)?;
+    let mut params_vec: Vec<rusqlite::types::Value> = memory_ids
+        .into_iter()
+        .map(rusqlite::types::Value::Text)
+        .collect();
+    params_vec.push(rusqlite::types::Value::Text(target_id.clone()));
+
+    let moved_count = stmt.execute(rusqlite::params_from_iter(params_vec))?;
+    drop(stmt);
+
+    let now = Utc::now().to_rfc3339();
+    source_project_ids.insert(target_id);
+
+    for pid in source_project_ids {
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memories WHERE project_id = ?1",
+            params![pid],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "UPDATE projects SET memory_count = ?1, last_active = ?2 WHERE id = ?3",
+            params![count, now, pid],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(moved_count)
 }
 
 pub fn export_memories_to_json(file_path: &str) -> Result<String, String> {
@@ -908,4 +1118,54 @@ pub fn import_memories_from_json(file_path: &str) -> Result<(usize, usize), Stri
     }
 
     Ok((proj_count, mem_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_tags_from_content() {
+        let tags1 = extract_tags_from_content("**Clean Code Principles:** Always keep functions small.");
+        assert!(tags1.contains(&"clean_code_principles".to_string()) || tags1.contains(&"clean_code".to_string()));
+
+        let tags2 = extract_tags_from_content("Use TypeScript and React for UI development");
+        assert!(tags2.contains(&"typescript".to_string()));
+        assert!(tags2.contains(&"react".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_target_project_id() {
+        let global_id = resolve_target_project_id(true, None, None, false).unwrap();
+        assert_eq!(global_id, "global");
+
+        let global_id2 = resolve_target_project_id(false, Some("global"), None, false).unwrap();
+        assert_eq!(global_id2, "global");
+
+        let cwd_id = resolve_target_project_id(false, None, None, true).unwrap();
+        assert!(!cwd_id.is_empty());
+        assert_ne!(cwd_id, "global");
+    }
+
+    #[test]
+    fn test_add_and_unified_get_memories() {
+        let test_item = BatchMemoryItem {
+            content: "**Unit Testing Rule:** Always run cargo test before git commit.".to_string(),
+            tags: None,
+            metadata: None,
+            is_permanent: Some(true),
+        };
+
+        let added = add_memories(vec![test_item], false, None, None).unwrap();
+        assert_eq!(added.len(), 1);
+        let mem_id = added[0].id.clone();
+
+        let all_mems = get_memories(None, 100, None, None, false, None, None).unwrap();
+        assert!(all_mems.iter().any(|m| m.id == mem_id));
+
+        let searched = get_memories(Some("cargo test"), 10, None, None, false, None, None).unwrap();
+        assert!(searched.iter().any(|m| m.id == mem_id));
+
+        let _ = delete_memories(vec![mem_id]);
+    }
 }

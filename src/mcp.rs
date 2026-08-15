@@ -233,7 +233,7 @@ pub fn run_mcp_mode() {
                         },
                         "serverInfo": {
                             "name": "apm-mcp-rust",
-                            "version": "1.0.0"
+                            "version": "1.1.0"
                         }
                     })),
                     error: None,
@@ -253,65 +253,34 @@ pub fn run_mcp_mode() {
 
             "tools/list" => {
                 let tools_list = vec![
-                    ToolBuilder::new("get_project")
-                        .description("Get an existing project by name/path or create a new one.")
-                        .add_string_param("name", "Project name")
-                        .add_string_param("path", "Project directory path")
-                        .required_params(&["name"])
-                        .build(),
-
-                    ToolBuilder::new("list_projects")
-                        .description("List all registered projects in the memory database.")
-                        .build(),
-
-                    ToolBuilder::new("clear_memories")
-                        .description("Delete ALL memories (both permanent and short-term) for a project.")
-                        .add_string_param("project_id", "Unique Project ID")
-                        .add_string_param("path", "Optional project directory path")
-                        .required_params(&["project_id"])
-                        .build(),
-
-                    ToolBuilder::new("delete_projects")
-                        .description("Delete 1 or multiple projects by an array of project IDs.")
-                        .add_array_param("project_ids", "string", "List of project IDs to delete")
-                        .required_params(&["project_ids"])
+                    ToolBuilder::new("get_memories")
+                        .description("Retrieve or search memories. If query is omitted, retrieves all memories for the current project and global rules. If query is provided, performs full-text FTS5 BM25 search.")
+                        .add_string_param("query", "Optional search keyword or query for full-text BM25 search")
+                        .add_number_param("limit", 100, "Maximum number of memories to return")
+                        .add_array_param("tags", "string", "Filter by tags")
+                        .add_bool_param("is_permanent", "Filter permanent rules (true) or short-term memories (false)")
+                        .add_bool_param("is_global", "Query only global user memories if true")
+                        .add_string_param("project", "Optional project name, ID, or directory path (auto-detects CWD if omitted)")
+                        .add_string_param("path", "Optional directory path")
                         .build(),
 
                     ToolBuilder::new("add_memories")
-                        .description("Add or smart-upsert 1 or multiple memory entries at once.")
-                        .add_string_param("project_id", "Unique Project ID")
-                        .add_string_param("path", "Optional project path")
+                        .description("Add or smart-upsert 1 or multiple memory entries. Automatically targets current workspace project, or global if is_global=true.")
+                        .add_bool_param("is_global", "Set to true to save as universal global memory/rule across all projects")
+                        .add_string_param("project", "Optional project name, ID, or directory path (auto-detects CWD if omitted)")
+                        .add_string_param("path", "Optional directory path")
                         .add_object_array_param(
                             "items",
                             ObjectBuilder::new()
                                 .string("content", "Memory content text")
-                                .string_array("tags", "Optional tags array")
+                                .string_array("tags", "Optional tags array (auto-extracted if omitted)")
                                 .object("metadata", "Optional metadata object")
-                                .bool_flag("is_permanent", "Whether memory is permanent")
+                                .bool_flag("is_permanent", "Whether memory is permanent (rule/architecture/convention)")
                                 .required(&["content"])
                                 .build(),
                             "Array of memory entries to add or update"
                         )
-                        .required_params(&["project_id", "items"])
-                        .build(),
-
-                    ToolBuilder::new("get_memories")
-                        .description("Retrieve valid stored memories for a project.")
-                        .add_string_param("project_id", "Unique Project ID")
-                        .add_number_param("limit", 100, "Maximum number of memories to return")
-                        .add_array_param("tags", "string", "Filter tags")
-                        .add_bool_param("is_permanent", "Filter permanent or short-term")
-                        .add_string_param("path", "Optional project path")
-                        .required_params(&["project_id"])
-                        .build(),
-
-                    ToolBuilder::new("search_memories")
-                        .description("FTS5 Full-Text BM25 relevance search across memories content and tags.")
-                        .add_string_param("project_id", "Unique Project ID")
-                        .add_string_param("query", "Search query / keyword")
-                        .add_number_param("limit", 100, "Maximum results")
-                        .add_string_param("path", "Optional project path")
-                        .required_params(&["project_id", "query"])
+                        .required_params(&["items"])
                         .build(),
 
                     ToolBuilder::new("get_memory")
@@ -330,7 +299,7 @@ pub fn run_mcp_mode() {
                         .build(),
 
                     ToolBuilder::new("delete_memories")
-                        .description("Delete 1 or multiple memories by an array of memory IDs.")
+                        .description("Delete 1 or multiple memories by memory IDs.")
                         .add_array_param("memory_ids", "string", "List of memory IDs to delete")
                         .required_params(&["memory_ids"])
                         .build(),
@@ -342,37 +311,50 @@ pub fn run_mcp_mode() {
                         .required_params(&["memory_ids", "is_permanent"])
                         .build(),
 
-                    ToolBuilder::new("memory_stats")
-                        .description("Get memory database usage statistics (projects, memories, db size).")
+                    ToolBuilder::new("clear_memories")
+                        .description("Delete ALL memories for the current project (or global if is_global=true).")
+                        .add_bool_param("is_global", "Set to true to clear global memories")
+                        .add_string_param("project", "Optional project name, ID, or path")
+                        .add_string_param("path", "Optional directory path")
                         .build(),
 
                     ToolBuilder::new("cleanup")
                         .description("Retention cleanup for short-term memories older than 30 days.")
-                        .add_string_param("project_id", "Unique Project ID")
                         .add_number_param("max_memories", 50, "Maximum short-term memories to retain")
                         .add_number_param("expire_days", 30, "Expiration age in days")
-                        .required_params(&["project_id"])
+                        .add_bool_param("is_global", "Set to true to clean up global short-term memories")
+                        .add_string_param("project", "Optional project name, ID, or path")
+                        .add_string_param("path", "Optional directory path")
                         .build(),
 
                     ToolBuilder::new("link_projects")
-                        .description("Link current project to 1 or more target projects to inherit their permanent rules.")
-                        .add_string_param("project_id", "Current Project ID")
-                        .add_array_param("target_project_ids", "string", "Array of target project IDs to link")
+                        .description("Link current project to a target project to inherit its permanent rules.")
+                        .add_string_param("target_project", "Target project name or directory path to link and inherit rules from")
+                        .add_string_param("source_project", "Optional source project name, ID, or path")
                         .add_string_param("path", "Optional directory path")
-                        .required_params(&["project_id", "target_project_ids"])
+                        .required_params(&["target_project"])
                         .build(),
 
-                    ToolBuilder::new("project_links")
-                        .description("Get linked project IDs for a project.")
-                        .add_string_param("project_id", "Project ID")
-                        .required_params(&["project_id"])
+                    ToolBuilder::new("list_projects")
+                        .description("List all registered projects in the memory database.")
+                        .build(),
+
+                    ToolBuilder::new("memory_stats")
+                        .description("Get memory database usage statistics (projects, memories, db size).")
                         .build(),
 
                     ToolBuilder::new("move_memories")
-                        .description("Move 1 or multiple memories by ID array to another target project (e.g. workspace project ID or 'global'). Automatically resolves and updates source project counts.")
+                        .description("Move memories by ID to another project or global.")
                         .add_array_param("memory_ids", "string", "Array of memory IDs to move")
-                        .add_string_param("target_project_id", "Target project ID to move memories into (e.g. workspace project ID or 'global')")
-                        .required_params(&["memory_ids", "target_project_id"])
+                        .add_bool_param("target_is_global", "Move to global if true")
+                        .add_string_param("target_project", "Target project name or directory path")
+                        .required_params(&["memory_ids"])
+                        .build(),
+
+                    ToolBuilder::new("delete_projects")
+                        .description("Delete 1 or multiple projects by name or ID.")
+                        .add_array_param("projects", "string", "List of project names or IDs to delete")
+                        .required_params(&["projects"])
                         .build(),
                 ];
 
@@ -391,84 +373,33 @@ pub fn run_mcp_mode() {
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
                 let tool_result = match tool_name {
-                    "get_project" => {
-                        let name = args.get("name").and_then(|v| v.as_str());
-                        let path = args.get("path").and_then(|v| v.as_str());
-                        match get_project(name, path, true) {
-                            Ok(p) => mcp_ok_val(&json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count, "linked_project_ids": p.linked_project_ids })),
-                            Err(e) => mcp_err_str(e),
-                        }
-                    }
+                    "get_memories" => {
+                        let query = args.get("query").and_then(Value::as_str);
+                        let limit = usize::try_from(args.get("limit").and_then(Value::as_u64).unwrap_or(100)).unwrap_or(100);
+                        let is_perm = args.get("is_permanent").and_then(Value::as_bool);
+                        let is_global = args.get("is_global").and_then(Value::as_bool).unwrap_or(false);
+                        let project_override = args.get("project").and_then(Value::as_str);
+                        let path = args.get("path").and_then(Value::as_str);
+                        let tags: Option<Vec<String>> = args
+                            .get("tags")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-                    "list_projects" => match list_projects() {
-                        Ok(projs) => {
-                            let simple: Vec<Value> = projs
-                                .iter()
-                                .map(|p| json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count }))
-                                .collect();
-                            mcp_ok_val(&json!(simple))
-                        }
-                        Err(e) => mcp_err_str(e),
-                    },
-
-                    "clear_memories" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
-                        let path = args.get("path").and_then(|v| v.as_str());
-                        match clear_memories(project_id, path) {
-                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
-                            Err(e) => mcp_err_str(e),
-                        }
-                    }
-
-                    "delete_projects" => {
-                        let project_ids: Vec<String> = args
-                            .get("project_ids")
-                            .and_then(|v| serde_json::from_value(v.clone()).ok())
-                            .unwrap_or_default();
-
-                        match delete_projects(project_ids) {
-                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                        match get_memories(query, limit, tags, is_perm, is_global, project_override, path) {
+                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
                     "add_memories" => {
-                        let project_id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
-                        let path = args.get("path").and_then(|v| v.as_str());
+                        let is_global = args.get("is_global").and_then(Value::as_bool).unwrap_or(false);
+                        let project_override = args.get("project").and_then(Value::as_str);
+                        let path = args.get("path").and_then(Value::as_str);
                         let items: Vec<BatchMemoryItem> = args
                             .get("items")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
 
-                        match add_memories(project_id, items, path) {
-                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
-                            Err(e) => mcp_err_str(e),
-                        }
-                    }
-
-                    "get_memories" => {
-                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
-                        let limit = usize::try_from(args.get("limit").and_then(Value::as_u64).unwrap_or(100)).unwrap_or(100);
-                        let path = args.get("path").and_then(Value::as_str);
-                        let is_perm = args.get("is_permanent").and_then(Value::as_bool);
-
-                        let tags: Option<Vec<String>> = args
-                            .get("tags")
-                            .and_then(|v| serde_json::from_value(v.clone()).ok());
-
-                        match get_memories(project_id, limit, tags, is_perm, path) {
-                            Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
-                            Err(e) => mcp_err_str(e),
-                        }
-                    }
-
-                    "search_memories" => {
-                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
-                        let query = args.get("query").and_then(Value::as_str).unwrap_or("");
-                        let limit = usize::try_from(args.get("limit").and_then(Value::as_u64).unwrap_or(100)).unwrap_or(100);
-                        let path = args.get("path").and_then(Value::as_str);
-
-                        match search_memories(project_id, query, limit, path) {
+                        match add_memories(items, is_global, project_override, path) {
                             Ok(mems) => mcp_ok_val(&format_memories_for_agent(&mems)),
                             Err(e) => mcp_err_str(e),
                         }
@@ -524,49 +455,77 @@ pub fn run_mcp_mode() {
                         }
                     }
 
-                    "memory_stats" => match memory_stats() {
-                        Ok(stats) => mcp_ok_val(&json!(stats)),
-                        Err(e) => mcp_err_str(e),
-                    },
+                    "clear_memories" => {
+                        let is_global = args.get("is_global").and_then(Value::as_bool).unwrap_or(false);
+                        let project_override = args.get("project").and_then(Value::as_str);
+                        let path = args.get("path").and_then(Value::as_str);
+                        match clear_memories(is_global, project_override, path) {
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
+                            Err(e) => mcp_err_str(e),
+                        }
+                    }
 
                     "cleanup" => {
-                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
+                        let is_global = args.get("is_global").and_then(Value::as_bool).unwrap_or(false);
+                        let project_override = args.get("project").and_then(Value::as_str);
+                        let path = args.get("path").and_then(Value::as_str);
                         let max_mems = usize::try_from(args.get("max_memories").and_then(Value::as_u64).unwrap_or(50)).unwrap_or(50);
                         let expire_days = args.get("expire_days").and_then(Value::as_i64).unwrap_or(30);
 
-                        match cleanup(project_id, max_mems, expire_days, None) {
+                        match cleanup(is_global, project_override, max_mems, expire_days, path) {
                             Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
                     "link_projects" => {
-                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
-                        let target_project_ids: Vec<String> = args.get("target_project_ids")
-                            .and_then(|v| serde_json::from_value(v.clone()).ok())
-                            .unwrap_or_default();
+                        let target_project = args.get("target_project").and_then(Value::as_str).unwrap_or("");
+                        let source_project = args.get("source_project").and_then(Value::as_str);
                         let path = args.get("path").and_then(Value::as_str);
-
-                        match link_projects(project_id, target_project_ids, path) {
-                            Ok(p) => mcp_ok_val(&json!({ "id": p.id, "linked_project_ids": p.linked_project_ids })),
+                        match link_projects(target_project, source_project, path) {
+                            Ok(p) => mcp_ok_val(&json!({ "id": p.id, "name": p.name, "linked_project_ids": p.linked_project_ids })),
                             Err(e) => mcp_err_str(e),
                         }
                     }
 
-                    "project_links" => {
-                        let project_id = args.get("project_id").and_then(Value::as_str).unwrap_or("");
-                        let linked = get_linked_project_ids(project_id);
-                        mcp_ok_val(&json!({ "project_id": project_id, "linked_project_ids": linked }))
-                    }
+                    "list_projects" => match list_projects() {
+                        Ok(projs) => {
+                            let simple: Vec<Value> = projs
+                                .iter()
+                                .map(|p| json!({ "id": p.id, "name": p.name, "memory_count": p.memory_count }))
+                                .collect();
+                            mcp_ok_val(&json!(simple))
+                        }
+                        Err(e) => mcp_err_str(e),
+                    },
+
+                    "memory_stats" => match memory_stats() {
+                        Ok(stats) => mcp_ok_val(&json!(stats)),
+                        Err(e) => mcp_err_str(e),
+                    },
 
                     "move_memories" => {
-                        let memory_ids: Vec<String> = args.get("memory_ids")
+                        let memory_ids: Vec<String> = args
+                            .get("memory_ids")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default();
-                        let target_project_id = args.get("target_project_id").and_then(Value::as_str).unwrap_or("");
+                        let target_is_global = args.get("target_is_global").and_then(Value::as_bool).unwrap_or(false);
+                        let target_project = args.get("target_project").and_then(Value::as_str);
 
-                        match move_memories(memory_ids, target_project_id) {
-                            Ok(count) => mcp_ok_val(&json!({ "success": true, "movedCount": count, "target_project_id": target_project_id })),
+                        match move_memories(memory_ids, target_is_global, target_project) {
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "movedCount": count })),
+                            Err(e) => mcp_err_str(e),
+                        }
+                    }
+
+                    "delete_projects" => {
+                        let projects: Vec<String> = args
+                            .get("projects")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                            .unwrap_or_default();
+
+                        match delete_projects(projects) {
+                            Ok(count) => mcp_ok_val(&json!({ "success": true, "deletedCount": count })),
                             Err(e) => mcp_err_str(e),
                         }
                     }

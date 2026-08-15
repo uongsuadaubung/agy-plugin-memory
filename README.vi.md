@@ -1,72 +1,72 @@
-# apm-mcp - Memory MCP Server & Plugin (Động cơ Pure Rust)
+# apm-mcp - Memory MCP Server & Plugin (Động cơ Rust Thuần)
 
-[![Tải về file thực thi](https://img.shields.io/badge/Download-Pre--compiled_Binaries-blue?style=for-the-badge&logo=github)](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest)
+[![Tải File Thực Thi](https://img.shields.io/badge/T%E1%BA%A3i_B%E1%BA%A3n_Bi%C3%AAn_D%E1%BB%8Bch_S%E1%BA%B5n-blue?style=for-the-badge&logo=github)](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest)
 
-Hệ thống **Memory Model Context Protocol (MCP) Server & Lifecycle Hook Plugin** siêu tốc, độc lập dành cho Antigravity IDE, được viết hoàn toàn bằng **Pure Rust** tích hợp SQLite biên dịch tĩnh (`rusqlite` static bundled), Tìm kiếm Toàn văn (`FTS5` + `BM25` ranking), Thuật toán Khử trùng rác Smart Upsert và Kế thừa trí nhớ liên kết giữa các dự án.
-
----
-
-## 🌟 Điểm sáng Kiến trúc & Tính năng Cốt lõi
-
-- 🦀 **Động cơ Pure Rust Siêu nhẹ**: Một file thực thi duy nhất (`apm-mcp.exe` / `apm-mcp`, RAM ~2.2MB, thời gian phản hồi tool <1ms).
-- 🧠 **Khử trùng rác Smart Upsert (Token Jaccard Similarity $\ge 60\%$ & Overlap Ratio $\ge 75\%$)**: Tự động phát hiện các câu ghi nhớ gần giống hoặc bổ sung để **ghi đè/cập nhật** trực tiếp trong SQLite, triệt tiêu 100% rác trùng lặp và mâu thuẫn.
-- 🔄 **Liên kết Dự án & Kế thừa Trí nhớ (`Project Linking`)**: Cho phép liên kết các dự án cùng hệ sinh thái (`link_projects`) để tự động kế thừa và nạp các Quy tắc vĩnh viễn từ dự án liên kết khi phiên chat bắt đầu.
-- 🏛️ **Tự động Học Cấu trúc Dự án (`Architecture Learning`)**: Tự động phân tích và lưu sơ đồ cây thư mục dự án (`tags: ["architecture"]`) làm quy tắc vĩnh viễn khi chạy `/init-apm` và tự động cập nhật khi refactoring.
-- ⚡ **PreInvocation Hook Nạp Ngữ cảnh Tự động**: Tự động tiêm 100% Quy tắc toàn cục, 100% Quy tắc vĩnh viễn của dự án, Quy tắc từ các dự án liên kết và 50 Tiến độ ngắn hạn mới nhất vào prompt của AI. Chuẩn hóa dạng text sạch, zero emoji rác.
-- 🚀 **Unified Batch-First API**: Tất cả các thao tác thêm, xóa, đổi tính vĩnh viễn đều xử lý mảng hàng loạt (`items` / `memory_ids`) giúp giảm chi phí lượt gọi tool của AI.
-- 📦 **Cài đặt 1 Click & Gỡ bỏ Tự động**: Lệnh `apm-mcp install` tự dọn thư mục cũ, cài đặt plugin vào `~/.gemini/config/plugins/apm-mcp/` và đăng ký biến môi trường `PATH`.
-- 🧹 **Gỡ bỏ Tận gốc (Detached Self-Deletion)**: Lệnh `apm-mcp uninstall` xóa sạch biến PATH, dọn thư mục plugin, xóa luôn cả thư mục cơ sở dữ liệu trí nhớ (`~/.gemini/config/memory`) và tự xóa file thực thi ở chế độ ngầm.
-- 🛡️ **Bảo vệ Trí nhớ Toàn cục (Hard-Lock Protection)**: Trí nhớ toàn cục (`project_id = "global"`) được bảo vệ tuyệt đối, không thể bị xóa nhầm khi xóa hàng loạt dự án.
-- 🏆 **Quy trình Release Tự động 1 Bản duy nhất (GitHub Actions)**: CI/CD tự động dọn dẹp các release/tag cũ để luôn duy trì **duy nhất 1 bản Release `latest`** chứa đủ 3 nền tảng (Windows x64, Linux x64, macOS ARM64).
+Hệ thống máy chủ Model Context Protocol (MCP) & Plugin Lifecycle Hook độc lập với hiệu năng siêu việt dành cho Antigravity, được phát triển hoàn toàn bằng **Rust Thuần** tích hợp SQLite tĩnh (`rusqlite bundled`), Tìm kiếm Toàn văn (`FTS5` + `BM25`), Khử trùng lặp Smart Upsert, Tự động nhận diện thư mục dự án qua CWD Hash trong 1 bước, và Cô lập đa cửa sổ song song qua Parent Process ID (PPID).
 
 ---
 
-## 💻 Danh mục Lệnh CLI (Terminal / PowerShell)
+## 🌟 Điểm Nhấn Kiến Trúc & Thiết Kế
 
-| Lệnh CLI | Mô tả |
+- 🦀 **Động cơ Rust Thuần**: File thực thi duy nhất (`apm-mcp.exe` / `apm-mcp`, RAM chỉ ~2.2MB, tốc độ phản hồi tool <1ms).
+- 📂 **Auto-CWD Hashing trong 1 Bước**: Tự động lấy thư mục gốc dự án từ hệ điều hành (`find_project_root`) và tính mã hash MD5. Loại bỏ 100% việc phải nhớ hay truyền `project_id`.
+- 🪟 **Cô Lập Đa Cửa Sổ Song Song (PPID Session Bridging)**: Sử dụng cây tiến trình của hệ điều hành (Parent Process ID - PPID) để liên kết phiên chat trên từng cửa sổ IDE với các cuộc gọi MCP tool tương ứng trong SQLite (`active_sessions`). Triệt tiêu hoàn toàn lỗi xung đột thư mục cài đặt của IDE và bảo đảm 100% không bao giờ lẫn lộn dữ liệu giữa nhiều cửa sổ dự án mở song song.
+- ⚡ **PreInvocation Hook Tất Định (Zero-Step)**: Tự động nạp toàn bộ Quy tắc Chung (Global Rules), Quy tắc Dự án (Project Permanent Rules) và Memory liên quan vào ngữ cảnh ở Turn 1 trước khi Agent kịp suy nghĩ.
+- 📖 **1 Tool Đọc Duy Nhất (`get_memories`)**: Xử lý trọn gói cả đọc toàn bộ danh sách lẫn tìm kiếm từ khóa toàn văn FTS5 BM25 khi truyền `query`.
+- 🧠 **Smart Upsert Tất Định (Token Jaccard & Replacement Guard)**: Tự động phát hiện khi quy tắc mới thay thế quy tắc cũ cùng chủ đề để cập nhật đè (`UPDATE`), chống sinh bản ghi rác hoặc xung đột.
+- 🏷️ **Tự Động Trích Xuất Tags**: Tự động bóc tách tiêu đề Markdown `**Tiêu đề:**` và từ khóa công nghệ thành tags phân loại chuẩn.
+- 🔄 **Liên Kết Dự Án (Project Linking)**: Kế thừa quy tắc vĩnh viễn từ các dự án liên quan trong hệ sinh thái (`link_projects`).
+- 📦 **Tự Cài Đặt 1-Click**: `apm-mcp install` tự dọn dẹp bản cài cũ, giải nén plugin vào `~/.gemini/config/plugins/apm-mcp/`, copy binary vào `bin/` và đăng ký cấu hình.
+- 🧹 **Gỡ Cài Đặt Sạch Sẽ**: `apm-mcp uninstall` dọn sạch tài nguyên và thư mục database (`~/.gemini/config/memory`).
+- 🛡️ **Bảo Vệ Quy Tắc Chung (Global Lock)**: Bộ nhớ chung (`global`) được bảo vệ nghiêm ngặt chống lại các thao tác xóa nhầm dự án.
+
+---
+
+## 💻 Lệnh CLI (Terminal / PowerShell)
+
+| Lệnh | Mô tả |
 |---|---|
-| `apm-mcp install` | Dọn dẹp bản cũ, cài đặt plugin vào `~/.gemini/config/plugins/apm-mcp/` và đăng ký biến môi trường `PATH`. |
-| `apm-mcp uninstall` | Gỡ bỏ plugin, xóa thư mục cơ sở dữ liệu trí nhớ (`~/.gemini/config/memory`), làm sạch `PATH` và tự xóa file ngầm. |
-| `apm-mcp export [file.json]` | Xuất toàn bộ cơ sở dữ liệu trí nhớ ra file sao lưu JSON (mặc định: `memory-backup.json`). |
-| `apm-mcp import <file.json>` | Nhập dữ liệu trí nhớ từ file sao lưu JSON vào database. |
-| `apm-mcp hook` | Thực thi chế độ PreInvocation Lifecycle Hook (được Antigravity gọi tự động). |
-| `apm-mcp mcp` | Thực thi chế độ Stdio MCP JSON-RPC Server (được Antigravity IDE gọi tự động). |
+| `apm-mcp install` | Dọn dẹp bản cũ, cài đặt plugin vào `~/.gemini/config/plugins/apm-mcp/` và đăng ký binary. |
+| `apm-mcp uninstall` | Gỡ cài đặt plugin và xóa sạch thư mục cơ sở dữ liệu (`~/.gemini/config/memory`). |
+| `apm-mcp export [file.json]` | Xuất toàn bộ database ra file JSON sao lưu (mặc định: `memory-backup.json`). |
+| `apm-mcp import <file.json>` | Nhập dữ liệu trí nhớ từ file JSON sao lưu vào database. |
+| `apm-mcp hook` | Chạy chế độ Lifecycle Hook PreInvocation (được Antigravity gọi tự động). |
+| `apm-mcp mcp` | Chạy chế độ Stdio MCP JSON-RPC Server (được Antigravity IDE gọi tự động). |
 
 ---
 
-## 📖 Hướng dẫn Sử dụng
+## 📖 Hướng Dẫn Sử Dụng
 
-### 1. Cài đặt & Khởi chạy
-- Tải file `apm-mcp.exe` (Windows) hoặc `apm-mcp` (Linux/macOS) từ trang [Releases](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest), sau đó chạy lệnh:
+### 1. Cài đặt & Thiết lập
+- Tải `apm-mcp.exe` (hoặc `apm-mcp` trên Linux/macOS) từ [Releases](https://github.com/uongsuadaubung/agy-plugin-memory/releases/tag/latest), mở terminal chạy:
   ```bash
   ./apm-mcp install
   ```
-- Lệnh `install` sẽ tự động dọn bản cũ, copy file binary, cấu hình và quy tắc vào thư mục plugin (`~/.gemini/config/plugins/apm-mcp/`), sẵn sàng sử dụng ngay trên Antigravity IDE.
+- Lệnh `install` sẽ tự động sao chép binary, cấu hình và quy tắc vào `~/.gemini/config/plugins/apm-mcp/`, sẵn sàng sử dụng ngay trên mọi workspace.
 
-> [!NOTE]
-> Hiện tại giao diện Antigravity IDE / CLI có thể chưa hiển thị trực quan tên plugin `apm-mcp` trong danh sách plugin. Để kiểm tra chắc chắn plugin đang hoạt động:
-> 1. **Thử yêu cầu lưu trí nhớ**: Bảo AI *"Lưu nhớ: dự án này ưu tiên dùng TypeScript cho frontend."*
-> 2. **Thử yêu cầu kiểm tra trí nhớ**: Bảo AI *"Kiểm tra xem hiện tại đang lưu những trí nhớ hay quy tắc gì."*
-> Nếu AI phản hồi xác nhận hoặc trả về danh sách trí nhớ đã lưu, `apm-mcp` đang hoạt động hoàn hảo ngầm bên dưới!
+### 2. Cách Cơ Chế Tự Động Nạp Hoạt Động
+Mỗi khi bạn gửi tin nhắn, Hook `apm-mcp` tự động nạp trước các dữ liệu sau vào ngữ cảnh:
+- **Global User Rules**: Quy tắc dùng chung cho mọi dự án (phong cách code, ngôn ngữ, quy ước).
+- **Project Permanent Rules**: Quy tắc kiến trúc, quy chuẩn công nghệ của riêng dự án hiện tại.
+- **Linked Project Rules**: Quy tắc kế thừa từ các dự án liên kết (`link_projects`).
+- **Prompt Keyword Matches**: Các memory khớp với từ khóa trong câu hỏi của bạn qua FTS5 BM25.
 
-### 2. Cơ chế Nạp Trí nhớ Tự động (Auto-Context Injection)
-Mỗi khi bạn gõ bất kỳ câu lệnh nào trong IDE, hệ thống sẽ tự động nạp ngầm các bối cảnh sau vào prompt của AI **trước khi AI suy nghĩ**:
-- **Quy tắc Toàn cục (Global Rules)**: Các sở thích cá nhân áp dụng cho mọi dự án (giải thích tiếng Việt, định dạng mã nguồn...).
-- **Quy tắc Vĩnh viễn (Project Permanent Rules)**: Kiến trúc, quy ước code, quy trình riêng của dự án hiện tại.
-- **Quy tắc Kế thừa (Linked Project Rules)**: Quy tắc được kế thừa từ các dự án khác trong cùng hệ sinh thái (`link_projects`).
-- **Tiến độ Ngắn hạn & Tìm kiếm Từ khóa**: 50 trí nhớ công việc gần nhất và các trí nhớ khớp với từ khóa trong câu lệnh của bạn (qua thuật toán FTS5 BM25).
+### 3. Cách Hoạt Động Khi Mở Nhiều Cửa Sổ Song Song
+Khi bạn mở đồng thời 2 hoặc nhiều cửa sổ dự án trên IDE:
+- Hook tự động nhận diện mã `Parent Process ID (PPID)` riêng biệt của từng cửa sổ và liên kết với thư mục dự án tương ứng.
+- Tiến trình MCP Server tra cứu chính xác PPID của nó trong bảng `active_sessions`, đảm bảo không bao giờ bị lẫn lộn giữa các dự án.
 
-### 3. Cách Yêu cầu AI Lưu Trí nhớ
-Bạn chỉ cần ra lệnh tự nhiên với AI:
-- **Lưu quy tắc toàn cục**: *"Lưu nhớ: luôn dùng tiếng Việt khi giải thích mã nguồn"* ➔ AI tự lưu với `project_id="global"` và `is_permanent=true`.
-- **Lưu quy tắc dự án**: *"Lưu nhớ: dự án này dùng Async/Await và Repository Pattern"* ➔ AI tự lưu vào `project_id` của dự án với `is_permanent=true`.
-- **Lưu tiến độ**: AI tự động lưu 1 dòng tóm tắt sau khi hoàn thành refactor hoặc sửa bug lớn (`is_permanent=false`).
+### 4. Cách Lưu Trí Nhớ & Quy Tắc
+Chỉ cần chat tự nhiên với AI:
+- **Quy tắc chung**: *"Hãy nhớ rằng tôi luôn viết comment bằng tiếng Anh trên mọi dự án."* ➔ Lưu toàn cục với `is_global=true`.
+- **Quy tắc dự án**: *"Hãy nhớ rằng dự án này dùng SolidJS và SCSS Modules."* ➔ Tự động lưu vào dự án hiện tại với `is_permanent=true`.
+- **Tiến độ ngắn hạn**: AI tự động lưu lại các mốc hoàn thành công việc (`is_permanent=false`).
 
-### 4. Các Lệnh Workflow / Slash Command
-- **`/init-apm`**: Khởi tạo bối cảnh trí nhớ dự án. AI sẽ quét cây thư mục gốc và lưu sơ đồ kiến trúc (`tags: ["architecture"]`).
-- **`/memory`**: Xem bảng tổng hợp trí nhớ toàn cục, trí nhớ dự án, danh sách liên kết và quản lý/xóa/chỉnh sửa các mục trí nhớ.
+### 5. Slash Commands & Workflows
+- **`/init-apm`**: Khởi tạo ngữ cảnh trí nhớ dự án, tự quét cấu trúc thư mục và tạo Sơ đồ Kiến trúc (`tags: ["architecture"]`).
+- **`/memory`**: Xem bảng tổng hợp quy tắc dự án, quy tắc chung và quản lý các liên kết.
 
-### 5. Sao lưu & Phôi phục Dữ liệu
+### 6. Sao Lưu & Chuyển Dữ Liệu
 - **Xuất dữ liệu sao lưu (Export)**:
   ```bash
   apm-mcp export memory-backup.json
@@ -78,106 +78,85 @@ Bạn chỉ cần ra lệnh tự nhiên với AI:
 
 ---
 
-## 🛠️ Danh mục 16 MCP Tool dành cho AI
+## 🛠️ Danh Mục MCP Tool Dành Cho AI
 
-### 1. Quản lý & Liên kết Dự án
-- **`get_project`**: Tự động nhận diện gốc dự án qua `.git`, `Cargo.toml`, `package.json`... và hash đường dẫn thành ID 12 ký tự duy nhất.
-  - *Tham số*: `name` (tùy chọn), `path` (tùy chọn)
-- **`list_projects`**: Liệt kê tất cả các dự án đã đăng ký trong database cùng ID, tên, số lượng memory và danh sách dự án liên kết.
-  - *Tham số*: Không có
-- **`link_projects`**: Liên kết dự án hiện tại với 1 hoặc nhiều dự án khác để tự động kế thừa quy tắc vĩnh viễn.
-  - *Tham số*: `project_id` (bắt buộc), `target_project_ids` (mảng mảng ID dự án), `path` (tùy chọn)
-- **`project_links`**: Lấy danh sách ID các dự án đang liên kết với dự án này.
-  - *Tham số*: `project_id` (bắt buộc)
-- **`clear_memories`**: Xóa TẤT CẢ trí nhớ của một dự án nhưng giữ lại bản ghi dự án (bảo vệ chống xóa `global`).
-  - *Tham số*: `project_id` (bắt buộc), `path` (tùy chọn)
-- **`delete_projects`**: Xóa hàng loạt dự án theo mảng ID (bảo vệ chống xóa `global`).
-  - *Tham số*: `project_ids` (mảng chuỗi ID)
-
-### 2. Thao tác Trí nhớ (Smart Upsert & Retrieval)
-- **`add_memories`**: Thêm hoặc cập nhật (Smart Upsert) hàng loạt trí nhớ với thuật toán khử trùng lặp Jaccard Similarity.
-  - *Tham số*: `project_id` (bắt buộc), `items` (mảng đối tượng `{ content, is_permanent, tags, metadata }`)
-- **`get_memories`**: Lấy danh sách trí nhớ đang active xếp theo thứ tự tính vĩnh viễn và thời gian mới nhất.
-  - *Tham số*: `project_id` (bắt buộc), `limit` (mặc định 100), `tags` (tùy chọn), `is_permanent` (tùy chọn)
-- **`search_memories`**: Tìm kiếm toàn văn FTS5 BM25 theo độ liên quan trên nội dung và tag.
-  - *Tham số*: `project_id` (bắt buộc), `query` (chuỗi từ khóa), `limit` (số lượng)
+### 1. Thao Tác Trí Nhớ (Đọc, Tìm Kiếm & Smart Upsert)
+- **`get_memories`**: Đọc toàn bộ bộ nhớ đang hoạt động hoặc tìm kiếm FTS5 BM25 theo từ khóa.
+  - *Tham số*: `query` (tùy chọn), `limit` (mặc định 100), `tags` (tùy chọn), `is_permanent` (tùy chọn), `is_global` (tùy chọn)
+- **`add_memories`**: Thêm hoặc cập nhật (Smart Upsert) trí nhớ với thuật toán khử trùng lặp Jaccard.
+  - *Tham số*: `items` (mảng đối tượng `{ content, is_permanent, tags, metadata }`), `is_global` (tùy chọn)
 - **`get_memory`**: Tra cứu thông tin một dòng trí nhớ theo Memory ID.
   - *Tham số*: `memory_id` (bắt buộc)
-- **`update_memory`**: Cập nhật trực tiếp nội dung, tag, metadata hoặc tính vĩnh viễn của một dòng trí nhớ.
+- **`update_memory`**: Cập nhật trực tiếp nội dung, tag, metadata hoặc tính vĩnh viễn theo Memory ID.
   - *Tham số*: `memory_id` (bắt buộc), `content` (tùy chọn), `tags` (tùy chọn), `metadata` (tùy chọn), `is_permanent` (tùy chọn)
 - **`delete_memories`**: Xóa hàng loạt trí nhớ theo mảng Memory ID.
   - *Tham số*: `memory_ids` (mảng chuỗi ID)
 - **`toggle_permanence`**: Cập nhật trạng thái vĩnh viễn cho hàng loạt trí nhớ.
   - *Tham số*: `memory_ids` (mảng chuỗi ID), `is_permanent` (boolean)
 - **`move_memories`**: Di chuyển hàng loạt trí nhớ sang dự án khác hoặc `global`.
-  - *Tham số*: `memory_ids` (mảng chuỗi ID), `target_project_id` (bắt buộc)
+  - *Tham số*: `memory_ids` (mảng chuỗi ID), `target_is_global` (tùy chọn), `target_project` (tùy chọn)
 
-### 3. Phân tích & Bảo trì
+### 2. Quản Lý & Liên Kết Dự Án
+- **`link_projects`**: Liên kết dự án hiện tại với dự án đích để kế thừa quy tắc.
+  - *Tham số*: `target_project` (tên hoặc đường dẫn dự án đích)
+- **`list_projects`**: Liệt kê tất cả các dự án đã đăng ký trong database cùng số lượng memory.
+  - *Tham số*: Không có
+- **`clear_memories`**: Xóa TẤT CẢ trí nhớ của dự án hiện tại (hoặc global nếu `is_global=true`).
+  - *Tham số*: `is_global` (tùy chọn)
+- **`delete_projects`**: Xóa 1 hoặc nhiều dự án theo tên hoặc ID.
+  - *Tham số*: `projects` (mảng tên hoặc ID dự án)
+
+### 3. Phân Tích & Bảo Trì
 - **`memory_stats`**: Thống kê chỉ số sử dụng database (tổng dự án, tổng trí nhớ, vĩnh viễn vs ngắn hạn, dung lượng file).
   - *Tham số*: Không có
 - **`cleanup`**: Thanh lý các trí nhớ ngắn hạn quá 30 ngày hoặc vượt ngưỡng 50 mục.
-  - *Tham số*: `project_id` (bắt buộc), `max_memories` (mặc định 50), `expire_days` (mặc định 30)
+  - *Tham số*: `max_memories` (mặc định 50), `expire_days` (mặc định 30), `is_global` (tùy chọn)
 
 ---
 
-## 🤖 GitHub Actions CI/CD Pipeline (1 Release Duy Nhất)
-
-Dự án tích hợp workflow tự động ([`.github/workflows/build.yml`](.github/workflows/build.yml)) được kích hoạt qua `workflow_dispatch` (Click **Actions ➔ Run workflow**).
-
-Đặc điểm:
-- 🧹 Tự động xóa các Release và Tag cũ trên GitHub qua `gh release delete --cleanup-tag`.
-- 📦 Đóng gói và phát hành **1 bản Release `latest` duy nhất** chứa đầy đủ file thực thi:
-  - `apm-mcp-windows-x64.exe`
-  - `apm-mcp-linux-x64`
-  - `apm-mcp-macos-arm64`
-
----
-
-## 🗄️ Vị trí Lưu trữ Cơ sở Dữ liệu
+## 🗄️ Vị Trí Lưu Trữ Cơ Sở Dữ Liệu
 
 - **Đường dẫn DB**: `~/.gemini/config/memory/memory.db` (`C:\Users\<username>\.gemini\config\memory\memory.db`)
-- **Động cơ**: SQLite WAL mode, bảng ảo FTS5 `memories_fts`, chỉ mục phủ (covering index) và SQL trigger tự động (`memories_ai`, `memories_ad`, `memories_au`).
+- **Động cơ**: SQLite WAL mode, bảng ảo FTS5 `memories_fts`, chỉ mục phủ (covering index), bảng cô lập phiên `active_sessions`, và SQL trigger tự động.
 
 ---
 
-## 🛠️ Hướng dẫn Phát triển & Sửa Mã nguồn (Developer Guide)
+## 🛠️ Hướng Dẫn Phát Triển & Sửa Mã Nguồn (Developer Guide)
 
-### 1. Yêu cầu Môi trường (Prerequisites)
+### 1. Yêu cầu Môi trường
 - **Rust Toolchain**: Rust 1.75+ (`cargo`, `rustc`). Tải tại [rustup.rs](https://rustup.rs/).
 - **Trình biên dịch C**: MSVC (Windows) hoặc GCC/Clang (Linux/macOS) để đóng gói SQLite tĩnh (`rusqlite bundled`).
 
-### 2. Cấu trúc Mã nguồn (Codebase Architecture)
+### 2. Cấu trúc Mã nguồn
 - `src/main.rs`: Điểm khởi chạy chương trình. Điều hướng các cờ CLI (`install`, `uninstall`, `export`, `import`, `hook`, `mcp`).
-- `src/mcp.rs`: Tầng MCP JSON-RPC Server. Định nghĩa 16 MCP tool trong `list_tools` và xử lý lệnh trong `call_tool`. **Chỉnh sửa file này nếu muốn thêm/rút gọn/sửa công cụ MCP.**
-- `src/db.rs`: Tầng cơ sở dữ liệu SQLite. Quản lý bảng `projects`, `memories`, FTS5 BM25 search, SQL trigger và thuật toán Smart Upsert.
-- `src/hook.rs`: Tầng Lifecycle PreInvocation Hook. Điều khiển việc tự động tiêm bối cảnh trí nhớ vào prompt của AI trước mỗi tin nhắn.
+- `src/mcp.rs`: Tầng MCP JSON-RPC Server. Định nghĩa MCP tool trong `tools/list` và xử lý lệnh trong `tools/call`.
+- `src/db.rs`: Tầng cơ sở dữ liệu SQLite. Quản lý Auto-CWD, FTS5 BM25 search, SQL trigger, bảng cô lập `active_sessions` và thuật toán Smart Upsert.
+- `src/hook.rs`: Tầng Lifecycle PreInvocation Hook. Điều khiển việc tự động tiêm bối cảnh trí nhớ và đăng ký phiên PPID vào SQLite.
+- `src/project.rs`: Trình tìm gốc dự án, bộ băm MD5 và hàm tra cứu Parent Process ID (PPID) qua Win32 FFI.
 - `src/similarity.rs`: Thuật toán tính độ tương đồng Token Jaccard & Negation Guard để loại bỏ trí nhớ trùng rác.
 - `src/install.rs`: Logic tự cài đặt (`--install`). Nhúng trực tiếp các file từ `plugins/apm-mcp/` vào file binary lúc biên dịch (`include_str!`).
 - `plugins/apm-mcp/`: Nơi chứa quy tắc ngầm (`rules/memory.md`), hướng dẫn agent (`instructions/memory.md`) và workflow (`workflows/`).
 
-### 3. Quy trình Sửa Code & Build Chi tiết
+### 3. Quy trình Sửa Code & Build Chi Tiết
 
 ```bash
-# 1. Clone repository về máy
+# 1. Clone repository
 git clone https://github.com/uongsuadaubung/agy-plugin-memory.git
 cd agy-plugin-memory
 
-# 2. Tiến hành sửa mã nguồn trong src/ hoặc sửa quy tắc trong plugins/apm-mcp/
+# 2. Chỉnh sửa code trong src/ hoặc plugins/apm-mcp/
 
-# 3. Kiểm tra lỗi biên dịch & chạy toàn bộ 27 unit tests
+# 3. Kiểm tra cú pháp và chạy toàn bộ 30 unit tests
 cargo check
 cargo test
 
 # 4. Biên dịch bản release tối ưu
 cargo build --release
 
-# 5. Cài đặt đè bản mới vừa build vào hệ thống IDE
+# 5. Cài đặt bản cập nhật trực tiếp vào hệ thống
 target/release/apm-mcp install
 ```
 
-> [!TIP]
-> Do các tệp quy tắc trong `plugins/apm-mcp/` được nhúng trực tiếp vào file binary lúc biên dịch qua lệnh `include_str!`, chỉ cần chạy `cargo build --release` và `apm-mcp install` thì bản quy tắc mới sẽ tự động được giải nén vào `~/.gemini/config/plugins/apm-mcp/`.
+## 📄 License
 
-## 📄 Bản quyền
-
-Bản quyền thuộc về MIT © uongsuadaubung
+MIT © uongsuadaubung

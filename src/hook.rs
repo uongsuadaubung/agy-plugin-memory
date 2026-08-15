@@ -3,7 +3,7 @@ use serde_json::json;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Read, Write as IoWrite};
 
-use crate::db::{get_memories, get_project, search_memories};
+use crate::db::{get_memories, get_project};
 use crate::project::find_project_root;
 
 pub const MAX_GLOBAL_MEMORIES: usize = 1000;
@@ -18,6 +18,8 @@ struct HookPayload {
     user_prompt: Option<String>,
     #[serde(rename = "prompt")]
     prompt: Option<String>,
+    #[serde(rename = "conversationId")]
+    conversation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,6 +40,7 @@ pub fn run_hook_mode() {
 
     let mut workspace_paths: Vec<String> = Vec::new();
     let mut input_prompt: Option<String> = None;
+    let mut input_conversation_id: Option<String> = None;
 
     if !stdin_buffer.trim().is_empty() {
         if let Ok(payload) = serde_json::from_str::<HookPayload>(&stdin_buffer) {
@@ -45,6 +48,7 @@ pub fn run_hook_mode() {
                 workspace_paths = paths;
             }
             input_prompt = payload.user_prompt.or(payload.prompt);
+            input_conversation_id = payload.conversation_id;
         }
     }
 
@@ -54,7 +58,7 @@ pub fn run_hook_mode() {
     if workspace_paths.is_empty() {
         if let Ok(root_path) = find_project_root(None) {
             let root_str = root_path.to_string_lossy();
-            if let Ok(proj) = get_project(None, Some(&root_str), false) {
+            if let Ok(proj) = get_project(None, Some(&root_str), true) {
                 if !seen_project_ids.contains(&proj.id) {
                     seen_project_ids.insert(proj.id.clone());
                     projects.push(proj);
@@ -65,7 +69,7 @@ pub fn run_hook_mode() {
         for wp in &workspace_paths {
             if let Ok(root_path) = find_project_root(Some(wp)) {
                 let root_str = root_path.to_string_lossy();
-                if let Ok(proj) = get_project(None, Some(&root_str), false) {
+                if let Ok(proj) = get_project(None, Some(&root_str), true) {
                     if !seen_project_ids.contains(&proj.id) {
                         seen_project_ids.insert(proj.id.clone());
                         projects.push(proj);
@@ -80,36 +84,27 @@ pub fn run_hook_mode() {
         return;
     }
 
-    let global_mems = get_memories("global", MAX_GLOBAL_MEMORIES, None, None, None).unwrap_or_default();
+    let parent_pid = crate::project::get_parent_pid();
+    if let Some(primary_proj) = projects.first() {
+        let _ = crate::db::set_active_workspace(
+            &primary_proj.path,
+            &primary_proj.id,
+            &primary_proj.name,
+            parent_pid,
+            input_conversation_id.as_deref(),
+        );
+    }
+
+    let global_mems = get_memories(None, MAX_GLOBAL_MEMORIES, None, Some(true), true, None, None).unwrap_or_default();
 
     let mut ctx_text = String::with_capacity(1024);
 
-    if projects.len() == 1 {
-        let proj = &projects[0];
-        let _ = writeln!(
-            ctx_text,
-            "[Memory Context: {} | Project ID: {}]",
-            proj.name, proj.id
-        );
-        let _ = writeln!(
-            ctx_text,
-            "CRITICAL MEMORY DIRECTIVE: To answer questions about stored memories, rules, or saved context, you MUST FIRST execute call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={{\"project_id\": \"{}\"}}). DO NOT scan repository files before calling get_memories, and NEVER substitute repository files as stored memories. The final answer MUST be constructed strictly from the memory records returned by get_memories.",
-            proj.id
-        );
-    } else {
-        let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
-        let ids: Vec<&str> = projects.iter().map(|p| p.id.as_str()).collect();
-        let _ = writeln!(
-            ctx_text,
-            "[Memory Context: {} | Active Project IDs: {}]",
-            names.join(", "),
-            ids.join(", ")
-        );
-        let _ = writeln!(
-            ctx_text,
-            "CRITICAL MEMORY DIRECTIVE: To answer questions about stored memories, rules, or saved context, you MUST FIRST execute call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={{\"project_id\": \"<active_project_id>\"}}). DO NOT scan repository files before calling get_memories, and NEVER substitute repository files as stored memories. The final answer MUST be constructed strictly from the memory records returned by get_memories."
-        );
-    }
+    let proj_names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+    let _ = writeln!(ctx_text, "[Memory Active: {} | Global: Active]", proj_names.join(", "));
+    let _ = writeln!(
+        ctx_text,
+        "MEMORY DIRECTIVE: Follow all active project and global rules strictly. To query or search more memories, call get_memories(query=...). To save new rules, call add_memories(items=[...])."
+    );
 
     if !global_mems.is_empty() {
         ctx_text.push_str("\nGlobal User Rules:\n");
@@ -118,23 +113,20 @@ pub fn run_hook_mode() {
         }
     }
 
-    let mut total_memories_found = global_mems.len();
-
     for proj in &projects {
-        let perm_mems = get_memories(&proj.id, MAX_PERMANENT_MEMORIES, None, Some(true), Some(&proj.path)).unwrap_or_default();
-        let short_term_mems = get_memories(&proj.id, MAX_SHORT_TERM_MEMORIES, None, Some(false), Some(&proj.path)).unwrap_or_default();
+        let perm_mems = get_memories(None, MAX_PERMANENT_MEMORIES, None, Some(true), false, None, Some(&proj.path)).unwrap_or_default();
+        let short_term_mems = get_memories(None, MAX_SHORT_TERM_MEMORIES, None, Some(false), false, None, Some(&proj.path)).unwrap_or_default();
 
         let mut linked_mems_by_proj: Vec<(String, Vec<crate::db::MemoryRecord>)> = Vec::new();
         for linked_id in &proj.linked_project_ids {
             if linked_id != &proj.id && linked_id != "global" && !seen_project_ids.contains(linked_id) {
-                let lmems = get_memories(linked_id, MAX_PERMANENT_MEMORIES, None, Some(true), None).unwrap_or_default();
-                if !lmems.is_empty() {
-                    linked_mems_by_proj.push((linked_id.clone(), lmems));
+                if let Ok(lmems) = get_memories(None, MAX_PERMANENT_MEMORIES, None, Some(true), false, Some(linked_id), None) {
+                    if !lmems.is_empty() {
+                        linked_mems_by_proj.push((linked_id.clone(), lmems));
+                    }
                 }
             }
         }
-
-        total_memories_found += perm_mems.len() + short_term_mems.len() + linked_mems_by_proj.len();
 
         if !perm_mems.is_empty() {
             if projects.len() > 1 {
@@ -171,12 +163,9 @@ pub fn run_hook_mode() {
         if clean_prompt.len() >= 3 {
             let mut matched_mems = Vec::new();
             for proj in &projects {
-                if let Ok(mems) = search_memories(&proj.id, clean_prompt, 5, Some(&proj.path)) {
+                if let Ok(mems) = get_memories(Some(clean_prompt), 5, None, None, false, None, Some(&proj.path)) {
                     matched_mems.extend(mems);
                 }
-            }
-            if let Ok(gmems) = search_memories("global", clean_prompt, 5, None) {
-                matched_mems.extend(gmems);
             }
 
             if !matched_mems.is_empty() {
@@ -190,16 +179,11 @@ pub fn run_hook_mode() {
                 }
 
                 if !relevant_text.is_empty() {
-                    ctx_text.push_str("\nAuto-Injected Relevant Rules (Prompt Match):\n");
+                    ctx_text.push_str("\nRelevant Rules (Prompt Match):\n");
                     ctx_text.push_str(&relevant_text);
-                    total_memories_found += added_ids.len();
                 }
             }
         }
-    }
-
-    if total_memories_found == 0 {
-        ctx_text.push_str("\n[Database Status: No saved memories currently recorded for this project in DB. Invoke call_mcp_tool(ServerName=\"apm-mcp\", ToolName=\"get_memories\", Arguments={\"project_id\": \"<active_project_id>\"}) to query.]\n");
     }
 
     let resp = HookResponse {
